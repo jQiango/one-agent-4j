@@ -27,7 +27,7 @@ public class Demo01Controller {
     public Result<Map<String, Object>> hello() {
         OpenAiChatModel model = OpenAiChatModel.builder()
                 .baseUrl("https://api.siliconflow.cn")
-                .apiKey("sk-nfcjvrdsczvnkplcdcdprvhpzclbahcxgjjkhafawmzzftiq")
+                .apiKey("xxxx")
                 .modelName("deepseek-ai/DeepSeek-V3")
                 .build();
 
