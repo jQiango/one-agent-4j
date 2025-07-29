@@ -27,14 +27,10 @@ public class Demo01Controller {
     public Result<Map<String, Object>> hello() {
         OpenAiChatModel model = OpenAiChatModel.builder()
                 .baseUrl("https://api.siliconflow.cn")
-                .apiKey("xxxx")
+                .apiKey("sk-nfcjvrdsczvnkplcdcdprvhpzclbahcxgjjkhafawmzzftiq")
                 .modelName("deepseek-ai/DeepSeek-V3")
                 .build();
 
-
-        String answer = model.chat("你能告诉我今天杭州的天气吗");
-        System.out.println(answer);
-        
         SystemMessage systemMessage = SystemMessage.from("你是一个天气预报助手，回答用户关于天气的问题。");
         UserMessage userMessage = UserMessage.from("你能告诉我今天杭州的天气吗");
 
