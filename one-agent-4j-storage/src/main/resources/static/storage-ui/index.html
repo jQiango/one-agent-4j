@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>对象存储管理系统</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.7.2/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .sidebar {
+            min-height: 100vh;
+            background-color: #f8f9fa;
+        }
+        .file-item {
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .file-item:hover {
+            background-color: #e9ecef;
+        }
+        .folder-item {
+            color: #ffc107;
+        }
+        .file-item-icon {
+            font-size: 1.2em;
+            margin-right: 8px;
+        }
+        .upload-area {
+            border: 2px dashed #dee2e6;
+            border-radius: 8px;
+            padding: 40px;
+            text-align: center;
+            transition: border-color 0.3s;
+        }
+        .upload-area.dragover {
+            border-color: #007bff;
+            background-color: #f8f9fa;
+        }
+        .progress-bar {
+            height: 4px;
+        }
+        .config-card {
+            transition: transform 0.2s;
+        }
+        .config-card:hover {
+            transform: translateY(-2px);
+        }
+        
+        /* 加载动画 */
+        .spin {
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        /* 文件项悬停效果 */
+        .file-item:hover {
+            background-color: #f8f9fa;
+            border-color: #dee2e6;
+        }
+        
+        /* 文件夹项特殊样式 */
+        .file-item.folder-item {
+            background-color: #fff3cd;
+            border-color: #ffeaa7;
+        }
+        
+        .file-item.folder-item:hover {
+            background-color: #ffeaa7;
+        }
+        .current-path-bar {
+          background: #f8f9fa;
+          border-bottom: 1px solid #eee;
+          font-size: 12px;
+          letter-spacing: 0.5px;
+        }
+        .file-table {
+          background: #fff;
+          border-radius: 6px;
+          font-size: 15px;
+        }
+        .file-header {
+          background: #f8f9fa;
+          user-select: none;
+        }
+        .file-row.even-row { background: #fff; }
+        .file-row.odd-row  { background: #f7f9fa; }
+        .file-row { transition: background 0.15s; min-height: 36px; }
+        .file-row:hover { background: #e9f5ff; }
+        .text-truncate { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="container-fluid">
+            <div class="row">
+                <!-- 侧边栏 -->
+                <div class="col-md-3 col-lg-2 sidebar p-3">
+                    <h4 class="mb-4">
+                        <i class="bi bi-cloud"></i>
+                        对象存储
+                    </h4>
+                    
+                    <!-- 存储配置 -->
+                    <div class="mb-4">
+                        <h6>存储配置</h6>
+                        <div v-for="config in configs" :key="config.id" 
+                             class="config-card card mb-2 p-2" 
+                             :class="{ 'border-primary': selectedConfig?.id === config.id }"
+                             @click="selectConfig(config)">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <i class="bi bi-gear"></i>
+                                    {{ config.name }}
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" 
+                                           :checked="selectedConfig?.id === config.id">
+                                </div>
+                            </div>
+                            <small class="text-muted">{{ config.type }} - {{ config.endpoint }}</small>
+                        </div>
+                        
+                        <button class="btn btn-outline-primary btn-sm w-100" @click="showConfigModal = true">
+                            <i class="bi bi-plus"></i> 添加配置
+                        </button>
+                    </div>
+                    
+                    <!-- 存储桶 -->
+                    <div class="mb-4" v-if="selectedConfig">
+                        <h6>存储桶</h6>
+                        <select class="form-select form-select-sm" v-model="selectedBucket" @change="onBucketChange">
+                            <option value="">选择存储桶</option>
+                            <option v-for="bucket in buckets" :key="bucket" :value="bucket">
+                                {{ bucket }}
+                            </option>
+                        </select>
+                    </div>
+                    
+                    <!-- 文件夹导航 -->
+                    <div class="mb-4" v-if="currentPath">
+                        <h6>当前路径</h6>
+                        <nav aria-label="breadcrumb">
+                            <ol class="breadcrumb breadcrumb-sm">
+                                <li class="breadcrumb-item">
+                                    <a href="#" @click="navigateToPath('')">根目录</a>
+                                </li>
+                                <li v-for="(part, index) in pathParts" :key="index" class="breadcrumb-item">
+                                    <a href="#" @click="navigateToPath(getPathUpTo(index))">{{ part }}</a>
+                                </li>
+                            </ol>
+                        </nav>
+                    </div>
+                </div>
+                
+                <!-- 主内容区 -->
+                <div class="col-md-9 col-lg-10 p-4">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h3>文件管理</h3>
+                        <div>
+                            <button class="btn btn-outline-success me-2" @click="showUploadModal = true">
+                                <i class="bi bi-upload"></i> 上传文件
+                            </button>
+                            <button class="btn btn-outline-primary" @click="showFolderModal = true">
+                                <i class="bi bi-folder-plus"></i> 新建文件夹
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- 文件列表 -->
+                    <div class="card">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <div>
+                                <span v-if="currentPath">{{ currentPath || '根目录' }}</span>
+                                <span v-else>根目录</span>
+                            </div>
+                            <div>
+                                <!-- 搜索框 -->
+                                <div class="input-group input-group-sm" style="width: 250px;">
+                                    <input type="text" class="form-control" placeholder="搜索文件..."
+                                           v-model="searchKeyword" @keyup.enter="searchFiles">
+                                    <button class="btn btn-outline-secondary" @click="searchFiles">
+                                        <i class="bi bi-search"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div v-if="loading" class="text-center py-4">
+                                <div class="spinner-border" role="status">
+                                    <span class="visually-hidden">加载中...</span>
+                                </div>
+                            </div>
+                            
+                            <!-- 面包屑导航 -->
+                            <nav v-if="currentPath" aria-label="breadcrumb" class="mb-3">
+                                <ol class="breadcrumb mb-0">
+                                    <li class="breadcrumb-item">
+                                        <a href="#" @click="navigateToPath('')">
+                                            <i class="bi bi-house"></i> 根目录
+                                        </a>
+                                    </li>
+                                    <li v-for="(part, index) in pathParts" :key="index"
+                                        class="breadcrumb-item"
+                                        :class="{ active: index === pathParts.length - 1 }">
+                                        <a v-if="index < pathParts.length - 1"
+                                           href="#" @click="navigateToPath(getPathUpTo(index))">
+                                            {{ part }}
+                                        </a>
+                                        <span v-else>{{ part }}</span>
+                                    </li>
+                                </ol>
+                            </nav>
+
+                            <!-- 返回上级目录按钮 -->
+                            <div v-if="currentPath" class="mb-3">
+                                <button class="btn btn-sm btn-outline-secondary" @click="goBack()">
+                                    <i class="bi bi-arrow-left"></i> 返回上级
+                                </button>
+                            </div>
+
+                            <!-- 当前路径展示 -->
+                            <div class="current-path-bar px-2 py-1 text-muted" style="font-size:12px;">
+                              <i class="bi bi-folder2-open"></i>
+                              {{ currentPath || '/' }}
+                            </div>
+                            <!-- 文件表格 -->
+                            <div class="file-table">
+                              <div class="file-header d-flex align-items-center px-2 py-1 border-bottom text-secondary small fw-bold">
+                                <div style="width:32px"></div>
+                                <div class="flex-grow-1">文件名</div>
+                                <div style="width:100px">大小</div>
+                                <div style="width:160px">修改时间</div>
+                                <div style="width:120px"></div>
+                              </div>
+                              <div v-for="(item, idx) in sortedFiles" :key="item.key"
+                                   class="file-row d-flex align-items-center px-2 py-1 border-bottom"
+                                   :class="{'even-row': idx % 2 === 0, 'odd-row': idx % 2 === 1}"
+                                   @dblclick="item.isFolder ? navigateToPath(item.key) : null"
+                                   :title="item.name">
+                                <div style="width:32px">
+                                  <i :class="item.isFolder ? 'bi bi-folder-fill text-secondary' : getFileIcon(item.name)" style="font-size:1.2em"></i>
+                                </div>
+                                <div class="flex-grow-1 text-truncate">
+                                  <span class="fw-bold" v-if="item.isFolder">{{ item.name }}</span>
+                                  <span v-else>{{ item.name }}</span>
+                                </div>
+                                <div style="width:100px" class="text-end text-muted small" v-if="!item.isFolder">{{ formatFileSize(item.size) }}</div>
+                                <div style="width:160px" class="text-muted small">{{ formatDate(item.lastModified) }}</div>
+                                <div style="width:120px" class="text-end">
+                                  <button v-if="!item.isFolder" class="btn btn-link btn-sm p-0 me-2" @click.stop="downloadFile(item)" title="下载">
+                                    <i class="bi bi-download"></i>
+                                  </button>
+                                  <button v-if="!item.isFolder" class="btn btn-link btn-sm p-0 me-2" @click.stop="previewFile(item)" title="预览">
+                                    <i class="bi bi-eye"></i>
+                                  </button>
+                                  <button class="btn btn-link btn-sm p-0 text-danger" @click.stop="deleteFile(item)" title="删除">
+                                    <i class="bi bi-trash"></i>
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                            <style>
+                            .current-path-bar {
+                              background: #f8f9fa;
+                              border-bottom: 1px solid #eee;
+                              font-size: 12px;
+                              letter-spacing: 0.5px;
+                            }
+                            .file-table {
+                              background: #fff;
+                              border-radius: 6px;
+                              font-size: 15px;
+                            }
+                            .file-header {
+                              background: #f8f9fa;
+                              user-select: none;
+                            }
+                            .file-row.even-row { background: #fff; }
+                            .file-row.odd-row  { background: #f7f9fa; }
+                            .file-row { transition: background 0.15s; min-height: 36px; }
+                            .file-row:hover { background: #e9f5ff; }
+                            .text-truncate { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+                            </style>
+                            
+                            <!-- 加载更多按钮 -->
+                            <div v-if="pagination.hasMore" class="text-center mt-3">
+                                <button class="btn btn-outline-primary" 
+                                        @click="loadMoreFiles()" 
+                                        :disabled="pagination.loading">
+                                    <span v-if="pagination.loading">
+                                        <i class="bi bi-arrow-clockwise spin"></i> 加载中...
+                                    </span>
+                                    <span v-else>
+                                        <i class="bi bi-arrow-down"></i> 加载更多
+                                    </span>
+                                </button>
+                            </div>
+                            
+                            <!-- 文件统计信息 -->
+                            <div v-if="files.length > 0" class="text-center mt-3 text-muted">
+                                <small>共显示 {{ files.length }} 个项目</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 配置模态框 -->
+        <div class="modal fade" id="configModal" tabindex="-1" v-show="showConfigModal">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">存储配置</h5>
+                        <button type="button" class="btn-close" @click="showConfigModal = false"></button>
+                    </div>
+                    <div class="modal-body">
+                        <form @submit.prevent="saveConfig">
+                            <div class="mb-3">
+                                <label class="form-label">配置名称</label>
+                                <input type="text" class="form-control" v-model="configForm.name" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">存储类型</label>
+                                <select class="form-select" v-model="configForm.type" required>
+                                    <option value="S3">AWS S3</option>
+                                    <option value="MINIO">MinIO</option>
+                                    <option value="OSS">阿里云OSS</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">端点URL</label>
+                                <input type="url" class="form-control" v-model="configForm.endpoint" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">访问密钥ID</label>
+                                <input type="text" class="form-control" v-model="configForm.accessKeyId" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">访问密钥</label>
+                                <input type="password" class="form-control" v-model="configForm.accessKeySecret" required>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">区域</label>
+                                <input type="text" class="form-control" v-model="configForm.region">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">默认桶名</label>
+                                <input type="text" class="form-control" v-model="configForm.defaultBucket">
+                            </div>
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" v-model="configForm.enabled">
+                                    <label class="form-check-label">启用</label>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                        <button type="button" class="btn btn-primary" @click="saveConfig">保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 上传模态框 -->
+        <div class="modal fade" id="uploadModal" tabindex="-1" v-show="showUploadModal">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">上传文件</h5>
+                        <button type="button" class="btn-close" @click="showUploadModal = false"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="upload-area" 
+                             @dragover.prevent="dragOver = true"
+                             @dragleave.prevent="dragOver = false"
+                             @drop.prevent="handleFileDrop"
+                             :class="{ 'dragover': dragOver }">
+                            <i class="bi bi-cloud-upload" style="font-size: 3em; color: #6c757d;"></i>
+                            <p class="mt-2">拖拽文件到此处或点击选择文件</p>
+                            <input type="file" ref="fileInput" @change="handleFileSelect" multiple style="display: none;">
+                            <button type="button" class="btn btn-outline-primary" @click="$refs.fileInput.click()">
+                                选择文件
+                            </button>
+                        </div>
+                        
+                        <div v-if="uploadFiles.length > 0" class="mt-3">
+                            <h6>待上传文件：</h6>
+                            <div v-for="file in uploadFiles" :key="file.name" class="d-flex justify-content-between align-items-center p-2 border rounded mb-2">
+                                <span>{{ file.name }}</span>
+                                <span class="text-muted">{{ formatFileSize(file.size) }}</span>
+                            </div>
+                        </div>
+                        
+                        <div v-if="uploadProgress > 0" class="mt-3">
+                            <div class="progress">
+                                <div class="progress-bar" :style="{ width: uploadProgress + '%' }"></div>
+                            </div>
+                            <small class="text-muted">{{ uploadProgress }}%</small>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                        <button type="button" class="btn btn-primary" @click="uploadFiles" :disabled="uploadFiles.length === 0">
+                            上传
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 新建文件夹模态框 -->
+        <div class="modal fade" id="folderModal" tabindex="-1" v-show="showFolderModal">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">新建文件夹</h5>
+                        <button type="button" class="btn-close" @click="showFolderModal = false"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">文件夹名称</label>
+                            <input type="text" class="form-control" v-model="folderName" placeholder="请输入文件夹名称">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                        <button type="button" class="btn btn-primary" @click="createFolder">创建</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+        <!-- Toast容器 -->
+        <div id="toastContainer" class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 1055;">
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.2.31/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios@0.27.2/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
+

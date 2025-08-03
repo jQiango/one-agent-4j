@@ -24,6 +24,7 @@
         <module>one-agent-4j-dao</module>
         <module>one-agent-4j-service</module>
         <module>one-agent-4j-web</module>
+        <module>one-agent-4j-storage</module>
     </modules>
     
     <properties>
@@ -31,9 +32,10 @@
         <langchain4j.version>1.1.0</langchain4j.version>
         <mybatis-plus.version>3.5.12</mybatis-plus.version>
         <mysql.version>9.3.0</mysql.version>
-        <lombok.version>1.18.28</lombok.version>
+        <lombok.version>1.18.30</lombok.version>
         <fastjson2.version>2.0.57</fastjson2.version>
         <commons-collections4.version>4.5.0</commons-collections4.version>
+        <mybatis.version>3.5.19</mybatis.version>
     </properties>
     
     <!-- 依赖管理 -->
@@ -64,6 +66,11 @@
                 <groupId>com.baomidou</groupId>
                 <artifactId>mybatis-plus-annotation</artifactId>
                 <version>${mybatis-plus.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.mybatis</groupId>
+                <artifactId>mybatis</artifactId>
+                <version>${mybatis.version}</version>
             </dependency>
             <!-- 项目内部模块 -->
             <dependency>
@@ -107,6 +114,32 @@
                 <groupId>org.apache.commons</groupId>
                 <artifactId>commons-collections4</artifactId>
                 <version>${commons-collections4.version}</version>
+            </dependency>
+            
+            <!-- AWS S3 SDK -->
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>s3</artifactId>
+                <version>2.28.16</version>
+            </dependency>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>sts</artifactId>
+                <version>2.28.16</version>
+            </dependency>
+            
+            <!-- MinIO Client -->
+            <dependency>
+                <groupId>io.minio</groupId>
+                <artifactId>minio</artifactId>
+                <version>8.5.7</version>
+            </dependency>
+            
+            <!-- 文件上传相关 -->
+            <dependency>
+                <groupId>commons-io</groupId>
+                <artifactId>commons-io</artifactId>
+                <version>2.15.1</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
