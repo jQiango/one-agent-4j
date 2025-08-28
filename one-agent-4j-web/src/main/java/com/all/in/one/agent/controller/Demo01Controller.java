@@ -6,7 +6,9 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.HashMap;
 import java.util.List;
@@ -27,7 +29,7 @@ public class Demo01Controller {
     public Result<Map<String, Object>> hello() {
         OpenAiChatModel model = OpenAiChatModel.builder()
                 .baseUrl("https://api.siliconflow.cn")
-                .apiKey("xxx")
+                .apiKey("sk-jkybbrtrsztqloarekrvuragsqcjucgibjpnipknmnuoyyet")
                 .modelName("deepseek-ai/DeepSeek-V3")
                 .build();
 
@@ -45,7 +47,6 @@ public class Demo01Controller {
             "totalTokens", chat.tokenUsage() != null ? chat.tokenUsage().totalTokenCount() : 0
         ));
         responseData.put("finishReason", chat.finishReason() != null ? chat.finishReason().toString() : null);
-        
         return Result.success("AI聊天成功", responseData);
     }
 }

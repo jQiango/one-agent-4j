@@ -83,6 +83,11 @@ public interface StorageService {
     String getPreviewUrl(Long fileId);
     
     /**
+     * 按对象键直接预览（流式输出，Content-Disposition=inline）
+     */
+    void previewByKey(Long configId, String bucketName, String objectKey, HttpServletResponse response);
+    
+    /**
      * 创建文件夹
      */
     void createFolder(Long configId, String bucketName, String folderPath);
@@ -91,4 +96,4 @@ public interface StorageService {
      * 获取存储桶列表
      */
     List<String> listBuckets(Long configId);
-} 
+}

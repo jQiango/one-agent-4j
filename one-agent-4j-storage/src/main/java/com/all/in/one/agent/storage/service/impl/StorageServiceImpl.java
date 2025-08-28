@@ -315,6 +315,27 @@ public class StorageServiceImpl extends ServiceImpl<StorageConfigMapper, Storage
                     }
                 }
             }
+            // 补充：包含空目录占位对象（key 以 '/' 结尾且直接位于当前前缀下）
+            for (S3Object obj : response.contents()) {
+                String key = obj.key();
+                if (key.endsWith("/")) {
+                    String relative = (listDTO.getPrefix() != null && !listDTO.getPrefix().isEmpty())
+                            ? (key.startsWith(listDTO.getPrefix()) ? key.substring(listDTO.getPrefix().length()) : null)
+                            : key;
+                    if (relative != null && !relative.isEmpty() && !relative.contains("/")) {
+                        boolean exists = allFolders.stream().anyMatch(f -> key.equals(f.get("key")));
+                        if (!exists) {
+                            Map<String, Object> folderInfo = new HashMap<>();
+                            folderInfo.put("key", key);
+                            folderInfo.put("name", relative.substring(0, relative.length() - 1));
+                            folderInfo.put("isFolder", true);
+                            folderInfo.put("lastModified", null);
+                            folderInfo.put("size", 0L);
+                            allFolders.add(folderInfo);
+                        }
+                    }
+                }
+            }
             // 如果没有commonPrefixes，尝试从文件列表中提取
             if (allFolders.isEmpty()) {
                 Set<String> folderSet = new HashSet<>();
@@ -374,30 +395,18 @@ public class StorageServiceImpl extends ServiceImpl<StorageConfigMapper, Storage
                 allFiles.add(fileInfo);
             }
 
-            // 2. 合并并分页
-            List<Map<String, Object>> allItems = new ArrayList<>();
-            allItems.addAll(allFolders);
-            allItems.addAll(allFiles);
-            // 文件夹优先
-            allItems.sort((a, b) -> Boolean.TRUE.equals(b.get("isFolder")) ? 1 : -1);
-
-            int pageNo = listDTO.getPageNo() != null ? listDTO.getPageNo() : 1;
-            int pageSize = listDTO.getPageSize() != null ? listDTO.getPageSize() : 50;
-            int fromIndex = (pageNo - 1) * pageSize;
-            int toIndex = Math.min(fromIndex + pageSize, allItems.size());
-            List<Map<String, Object>> pageItems = fromIndex < toIndex ? allItems.subList(fromIndex, toIndex) : new ArrayList<>();
-
-            List<Map<String, Object>> pageFolders = pageItems.stream().filter(i -> Boolean.TRUE.equals(i.get("isFolder"))).collect(Collectors.toList());
-            List<Map<String, Object>> pageFiles = pageItems.stream().filter(i -> !Boolean.TRUE.equals(i.get("isFolder"))).collect(Collectors.toList());
+            // 2. 使用S3原生分页返回当前页（不做内存二次分页）
+            List<Map<String, Object>> pageFolders = allFolders;
+            List<Map<String, Object>> pageFiles = allFiles;
 
             Map<String, Object> pagination = new HashMap<>();
-            pagination.put("pageNo", pageNo);
+            int pageSize = listDTO.getPageSize() != null ? listDTO.getPageSize() : (listDTO.getMaxKeys() != null ? listDTO.getMaxKeys() : 100);
             pagination.put("pageSize", pageSize);
-            pagination.put("hasMore", allItems.size() > toIndex);
-            pagination.put("currentCount", pageItems.size());
+            pagination.put("hasMore", response.isTruncated());
+            pagination.put("nextContinuationToken", response.nextContinuationToken());
+            pagination.put("currentCount", pageFolders.size() + pageFiles.size());
             pagination.put("folderCount", pageFolders.size());
             pagination.put("fileCount", pageFiles.size());
-            pagination.put("total", allItems.size());
 
             result.put("folders", pageFolders);
             result.put("files", pageFiles);
@@ -505,6 +514,49 @@ public class StorageServiceImpl extends ServiceImpl<StorageConfigMapper, Storage
         }
     }
     
+    @Override
+    public void previewByKey(Long configId, String bucketName, String objectKey, HttpServletResponse response) {
+        StorageConfig config = getConfigById(configId);
+        if (config == null) {
+            throw new RuntimeException("存储配置不存在");
+        }
+
+        try {
+            S3Client s3Client = s3ClientUtil.createS3Client(config);
+
+            // 获取内容类型
+            String contentType = "application/octet-stream";
+            try {
+                HeadObjectRequest headReq = HeadObjectRequest.builder()
+                        .bucket(bucketName)
+                        .key(objectKey)
+                        .build();
+                HeadObjectResponse headResp = s3Client.headObject(headReq);
+                if (headResp.contentType() != null && !headResp.contentType().isEmpty()) {
+                    contentType = headResp.contentType();
+                }
+            } catch (S3Exception ignore) {
+                // 忽略HEAD失败，按默认类型预览
+            }
+
+            String fileName = objectKey.substring(objectKey.lastIndexOf('/') + 1);
+
+            response.setContentType(contentType);
+            response.setHeader("Content-Disposition", "inline; filename=" +
+                    URLEncoder.encode(fileName, StandardCharsets.UTF_8));
+
+            GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(objectKey)
+                    .build();
+
+            s3Client.getObject(getObjectRequest, ResponseTransformer.toOutputStream(response.getOutputStream()));
+        } catch (Exception e) {
+            log.error("文件预览失败", e);
+            throw new RuntimeException("文件预览失败: " + e.getMessage());
+        }
+    }
+
     @Override
     public void createFolder(Long configId, String bucketName, String folderPath) {
         StorageConfig config = getConfigById(configId);

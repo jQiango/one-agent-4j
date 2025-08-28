@@ -1,6 +1,6 @@
 const { createApp } = Vue;
 
-createApp({
+const app = createApp({
     data() {
         return {
             // 存储配置
@@ -22,6 +22,9 @@ createApp({
             buckets: [],
             selectedBucket: '',
             
+            // 目录树
+            treeRoots: [],
+            
             // 文件管理
             files: [],
             currentPath: '',
@@ -32,7 +35,7 @@ createApp({
                 hasMore: false,
                 nextContinuationToken: null,
                 currentCount: 0,
-                pageSize: 50,
+                pageSize: 100,
                 loading: false
             },
 
@@ -61,6 +64,10 @@ createApp({
             // 文件预览
             previewFile: null,
             showPreviewModal: false,
+
+            // 排序
+            sortKey: 'name',
+            sortDir: 'asc',
         };
     },
     
@@ -79,11 +86,37 @@ createApp({
             return this.files.filter(item => !item.isFolder);
         },
 
+        // 可见文件是否已全选
+        allVisibleSelected() {
+            const visibles = (this.sortedFiles || []).filter(f => !f.isFolder);
+            if (visibles.length === 0) return false;
+            const set = new Set(this.selectedFiles.map(f => f.key));
+            return visibles.every(f => set.has(f.key));
+        },
+
         sortedFiles() {
-            // 文件夹优先排序
-            return (this.files || []).slice().sort((a, b) => {
+            const arr = (this.files || []).slice();
+            const key = this.sortKey || 'name';
+            const dir = this.sortDir === 'desc' ? -1 : 1;
+
+            return arr.sort((a, b) => {
+                // 文件夹优先
                 if (a.isFolder && !b.isFolder) return -1;
                 if (!a.isFolder && b.isFolder) return 1;
+
+                let va, vb;
+                if (key === 'size') {
+                    va = a.size || 0; vb = b.size || 0;
+                } else if (key === 'lastModified') {
+                    va = new Date(a.lastModified || 0).getTime();
+                    vb = new Date(b.lastModified || 0).getTime();
+                } else {
+                    va = (a.name || '').toLowerCase();
+                    vb = (b.name || '').toLowerCase();
+                }
+
+                if (va < vb) return -1 * dir;
+                if (va > vb) return 1 * dir;
                 return 0;
             });
         }
@@ -97,16 +130,30 @@ createApp({
     methods: {
         // 初始化模态框
         initModals() {
-            // 监听模态框显示/隐藏事件
+            // 监听模态框隐藏事件，复用Bootstrap行为
             const modals = ['configModal', 'uploadModal', 'folderModal'];
             modals.forEach(modalId => {
-                const modal = document.getElementById(modalId);
-                if (modal) {
-                    modal.addEventListener('hidden.bs.modal', () => {
+                const el = document.getElementById(modalId);
+                if (el) {
+                    el.addEventListener('hidden.bs.modal', () => {
                         this.resetForms();
                     });
                 }
             });
+        },
+
+        // 打开/关闭 Bootstrap 模态框
+        openModal(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const modal = bootstrap.Modal.getOrCreateInstance(el);
+            modal.show();
+        },
+        hideModal(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            const modal = bootstrap.Modal.getOrCreateInstance(el);
+            modal.hide();
         },
         
         // 重置表单
@@ -190,10 +237,12 @@ createApp({
                 this.pagination.nextContinuationToken = null;
                 this.pagination.hasMore = false;
                 this.pagination.currentCount = 0;
+                this.initTree();
                 this.loadFiles();
             } else {
                 this.files = [];
                 this.currentPath = '';
+                this.treeRoots = [];
             }
         },
         
@@ -376,7 +425,7 @@ createApp({
         },
         
         // 上传文件
-        async uploadFiles() {
+        async doUploadFiles() {
             if (!this.selectedConfig || this.uploadFiles.length === 0) return;
             
             this.uploadProgress = 0;
@@ -507,6 +556,8 @@ createApp({
                     if (modal) {
                         modal.hide();
                     }
+                    // 刷新目录树与当前列表
+                    this.initTree();
                     this.loadFiles();
                 } else {
                     this.showError(response.data.message || '创建文件夹失败');
@@ -594,7 +645,7 @@ createApp({
         },
 
         // 文件预览
-        async previewFile(file) {
+        async doPreviewFile(file) {
             if (!file) return;
 
             this.previewFile = null;
@@ -646,6 +697,65 @@ createApp({
         navigateToPath(path) {
             this.currentPath = path;
             this.loadFiles();
+        },
+
+        // 目录树：节点导航
+        onTreeNavigate(node) {
+            if (!node || !node.isFolder) return;
+            this.currentPath = node.path || '';
+            node.expanded = true;
+            this.loadFiles();
+        },
+
+        // 目录树：初始化根节点
+        initTree() {
+            this.treeRoots = [{
+                name: '/',
+                path: '',
+                isFolder: true,
+                expanded: true,
+                loaded: false,
+                loading: true,
+                children: []
+            }];
+            this.loadTreeChildren(this.treeRoots[0]);
+        },
+
+        // 目录树：懒加载子目录
+        async loadTreeChildren(node) {
+            if (!this.selectedConfig || !this.selectedBucket || !node) return;
+            try {
+                const requestData = {
+                    configId: this.selectedConfig.id,
+                    bucketName: this.selectedBucket,
+                    prefix: node.path || '',
+                    delimiter: '/',
+                    pageSize: 200
+                };
+                const response = await axios.post(`${this.apiBaseUrl}/files/list`, requestData);
+                if (response.data.success) {
+                    const data = response.data.data || {};
+                    const folders = data.folders || [];
+                    node.children = folders.map(f => ({
+                        name: f.name,
+                        path: f.key,
+                        isFolder: true,
+                        expanded: false,
+                        loaded: false,
+                        loading: false,
+                        children: []
+                    }));
+                    node.loaded = true;
+                } else {
+                    this.showError(response.data.message || '加载目录失败');
+                }
+            } catch (e) {
+                console.error('加载目录失败:', e);
+                const errMsg = e.response?.data?.message || e.message || '加载目录失败';
+                this.showError(errMsg);
+            } finally {
+                node.loading = false;
+            }
         },
         
         // 获取到指定索引的路径
@@ -722,10 +832,47 @@ createApp({
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         },
         
-        // 格式化日期
+        // 格式化日期（兼容 S3 Instant 对象/ISO 字符串/时间戳）
         formatDate(date) {
             if (!date) return '';
-            return new Date(date).toLocaleString('zh-CN');
+            try {
+                if (date && typeof date === 'object' && date.epochSecond !== undefined) {
+                    const sec = Number(date.epochSecond);
+                    const nano = Number(date.nano || 0);
+                    const ms = sec * 1000 + Math.floor(nano / 1e6);
+                    return new Date(ms).toLocaleString('zh-CN');
+                }
+                return new Date(date).toLocaleString('zh-CN');
+            } catch {
+                return '';
+            }
+        },
+
+        // 切换排序（name/size/lastModified）
+        setSort(key) {
+            if (this.sortKey === key) {
+                this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                this.sortKey = key;
+                this.sortDir = 'asc';
+            }
+        },
+
+        // 可见文件全选/取消全选
+        toggleSelectAll() {
+            const visibles = (this.sortedFiles || []).filter(f => !f.isFolder);
+            const selectedKeys = new Set(this.selectedFiles.map(f => f.key));
+            const allSelected = visibles.length > 0 && visibles.every(f => selectedKeys.has(f.key));
+
+            if (allSelected) {
+                // 取消选择可见项
+                const visibleKeys = new Set(visibles.map(f => f.key));
+                this.selectedFiles = this.selectedFiles.filter(f => !visibleKeys.has(f.key));
+            } else {
+                // 合并选择可见项
+                const additions = visibles.filter(f => !selectedKeys.has(f.key));
+                this.selectedFiles = [...this.selectedFiles, ...additions];
+            }
         },
         
         // 显示成功消息
@@ -782,4 +929,50 @@ createApp({
             });
         }
     }
-}).mount('#app');
+});
+app.component('tree-node', {
+    props: {
+        node: { type: Object, required: true },
+        currentPath: { type: String, default: '' }
+    },
+    emits: ['navigate', 'load'],
+    methods: {
+        toggleExpand() {
+            if (!this.node.isFolder) return;
+            this.node.expanded = !this.node.expanded;
+            if (this.node.expanded && !this.node.loaded) {
+                this.node.loading = true;
+                this.$emit('load', this.node);
+            }
+        },
+        clickName() {
+            this.$emit('navigate', this.node);
+        }
+    },
+    template: `
+<li class="mb-1">
+  <div class="d-flex align-items-center">
+    <span class="me-1" @click.stop="toggleExpand" style="width:16px; display:inline-flex; justify-content:center;">
+      <i v-if="node.isFolder" :class="node.expanded ? 'bi bi-chevron-down' : 'bi bi-chevron-right'"></i>
+    </span>
+    <i v-if="node.isFolder" class="bi bi-folder-fill text-warning me-1"></i>
+    <i v-else class="bi bi-file-earmark text-secondary me-1"></i>
+    <a href="#" class="text-body text-decoration-none"
+       :class="{'fw-bold text-primary': (node.path || '') === (currentPath || '')}"
+       @click.prevent="clickName">{{ node.name || '/' }}</a>
+  </div>
+  <div v-if="node.expanded && node.loading" class="text-muted small ms-4">加载中...</div>
+  <ul v-if="node.children && node.children.length" v-show="node.expanded" class="list-unstyled ms-3 ps-2 border-start">
+    <tree-node
+      v-for="child in node.children"
+      :key="child.path || child.name"
+      :node="child"
+      :current-path="currentPath"
+      @navigate="$emit('navigate', $event)"
+      @load="$emit('load', $event)"
+    ></tree-node>
+  </ul>
+</li>
+`
+});
+app.mount('#app');

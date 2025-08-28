@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,7 +63,7 @@ public class StorageController {
     }
     
     /**
-     * 根��ID获取存储配置
+     * 根据ID获取存储配置
      */
     @GetMapping("/config/{id}")
     public Result<StorageConfig> getConfigById(@PathVariable Long id) {
@@ -123,7 +124,7 @@ public class StorageController {
             return Result.success(storageFile);
         } catch (Exception e) {
             log.error("文件上传失败", e);
-            return Result.error("���件上传失败: " + e.getMessage());
+            return Result.error("文件上传失败: " + e.getMessage());
         }
     }
     
@@ -142,6 +143,27 @@ public class StorageController {
             try {
                 response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
                 response.getWriter().write("文件下载失败: " + e.getMessage());
+            } catch (Exception ex) {
+                log.error("写入错误响应失败", ex);
+            }
+        }
+    }
+
+    /**
+     * 预览文件（按对象键，inline）
+     */
+    @GetMapping("/preview")
+    public void previewByKey(@RequestParam Long configId,
+                             @RequestParam String bucketName,
+                             @RequestParam String objectKey,
+                             HttpServletResponse response) {
+        try {
+            storageService.previewByKey(configId, bucketName, objectKey, response);
+        } catch (Exception e) {
+            log.error("文件预览失败", e);
+            try {
+                response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+                response.getWriter().write("文件预览失败: " + e.getMessage());
             } catch (Exception ex) {
                 log.error("写入错误响应失败", ex);
             }
@@ -263,7 +285,7 @@ public class StorageController {
     @PostMapping("/files/batch-download")
     public Result<String> batchDownloadFiles(@RequestBody Map<String, Object> request) {
         try {
-            // 这里可以实现生成临时下载链接或压缩包的逻辑
+            // TODO: 实现生成临时下载链接或压缩包的逻辑
             return Result.success("batch-download-url");
         } catch (Exception e) {
             log.error("批量下载文件失败", e);
@@ -272,7 +294,7 @@ public class StorageController {
     }
 
     /**
-     * 获取文件夹大小统计
+     * 获取文件夹大小统计（遍历分页）
      */
     @GetMapping("/folder/size")
     public Result<Map<String, Object>> getFolderSize(@RequestParam Long configId,
@@ -283,16 +305,37 @@ public class StorageController {
             listDTO.setConfigId(configId);
             listDTO.setBucketName(bucketName);
             listDTO.setPrefix(prefix);
-            listDTO.setMaxKeys(1000); // 设置一个较大的值来获取所有文件
+            listDTO.setPageSize(1000); // 提高单页容量以加快统计
+            String continuationToken = null;
 
-            Map<String, Object> result = storageService.listFiles(listDTO);
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> files = (List<Map<String, Object>>) result.get("objects");
+            long totalSize = 0L;
+            int fileCount = 0;
+            int safetyPages = 0;
 
-            long totalSize = files.stream()
-                .mapToLong(file -> (Long) file.get("size"))
-                .sum();
-            int fileCount = files.size();
+            do {
+                listDTO.setContinuationToken(continuationToken);
+                Map<String, Object> page = storageService.listFiles(listDTO);
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> files = (List<Map<String, Object>>) page.get("files");
+
+                if (files != null) {
+                    for (Map<String, Object> f : files) {
+                        Object sizeObj = f.get("size");
+                        if (sizeObj instanceof Number) {
+                            totalSize += ((Number) sizeObj).longValue();
+                            fileCount++;
+                        }
+                    }
+                }
+
+                @SuppressWarnings("unchecked")
+                Map<String, Object> pagination = (Map<String, Object>) page.get("pagination");
+                boolean hasMore = pagination != null && Boolean.TRUE.equals(pagination.get("hasMore"));
+                continuationToken = pagination != null ? (String) pagination.get("nextContinuationToken") : null;
+
+                if (++safetyPages > 2000) break; // 安全阈值，避免极端情况无限循环
+                if (!hasMore) break;
+            } while (continuationToken != null);
 
             Map<String, Object> stats = new HashMap<>();
             stats.put("totalSize", totalSize);
@@ -307,7 +350,7 @@ public class StorageController {
     }
 
     /**
-     * 搜索文件
+     * 搜索文件（遍历分页直到达到maxResults或无更多）
      */
     @GetMapping("/search")
     public Result<Map<String, Object>> searchFiles(@RequestParam Long configId,
@@ -316,29 +359,46 @@ public class StorageController {
                                                    @RequestParam(required = false) String prefix,
                                                    @RequestParam(defaultValue = "50") int maxResults) {
         try {
-            // 获取文件列表
             FileListDTO listDTO = new FileListDTO();
             listDTO.setConfigId(configId);
             listDTO.setBucketName(bucketName);
             listDTO.setPrefix(prefix);
-            listDTO.setMaxKeys(1000);
+            listDTO.setPageSize(500);
 
-            Map<String, Object> result = storageService.listFiles(listDTO);
-            @SuppressWarnings("unchecked")
-            List<Map<String, Object>> allFiles = (List<Map<String, Object>>) result.get("objects");
+            String continuationToken = null;
+            List<Map<String, Object>> matched = new ArrayList<>();
+            int safetyPages = 0;
 
-            // 根据关键词过滤文件
-            List<Map<String, Object>> filteredFiles = allFiles.stream()
-                .filter(file -> {
-                    String key = (String) file.get("key");
-                    return key.toLowerCase().contains(keyword.toLowerCase());
-                })
-                .limit(maxResults)
-                .collect(Collectors.toList());
+            do {
+                listDTO.setContinuationToken(continuationToken);
+                Map<String, Object> page = storageService.listFiles(listDTO);
+
+                @SuppressWarnings("unchecked")
+                List<Map<String, Object>> files = (List<Map<String, Object>>) page.get("files");
+                if (files != null) {
+                    for (Map<String, Object> file : files) {
+                        String key = (String) file.get("key");
+                        if (key != null && key.toLowerCase().contains(keyword.toLowerCase())) {
+                            matched.add(file);
+                            if (matched.size() >= maxResults) break;
+                        }
+                    }
+                }
+
+                if (matched.size() >= maxResults) break;
+
+                @SuppressWarnings("unchecked")
+                Map<String, Object> pagination = (Map<String, Object>) page.get("pagination");
+                boolean hasMore = pagination != null && Boolean.TRUE.equals(pagination.get("hasMore"));
+                continuationToken = pagination != null ? (String) pagination.get("nextContinuationToken") : null;
+
+                if (++safetyPages > 2000) break;
+                if (!hasMore) break;
+            } while (continuationToken != null);
 
             Map<String, Object> searchResult = new HashMap<>();
-            searchResult.put("files", filteredFiles);
-            searchResult.put("totalFound", filteredFiles.size());
+            searchResult.put("files", matched.size() > maxResults ? matched.subList(0, maxResults) : matched);
+            searchResult.put("totalFound", matched.size());
             searchResult.put("keyword", keyword);
 
             return Result.success(searchResult);

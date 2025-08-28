@@ -55,6 +55,10 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>com.all.in</groupId>
+            <artifactId>one-agent-4j-common</artifactId>
+        </dependency>
     </dependencies>
     
     <build>

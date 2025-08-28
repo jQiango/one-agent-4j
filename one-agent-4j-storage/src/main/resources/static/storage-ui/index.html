@@ -124,9 +124,6 @@
                             <small class="text-muted">{{ config.type }} - {{ config.endpoint }}</small>
                         </div>
                         
-                        <button class="btn btn-outline-primary btn-sm w-100" @click="showConfigModal = true">
-                            <i class="bi bi-plus"></i> 添加配置
-                        </button>
                     </div>
                     
                     <!-- 存储桶 -->
@@ -140,19 +137,21 @@
                         </select>
                     </div>
                     
-                    <!-- 文件夹导航 -->
-                    <div class="mb-4" v-if="currentPath">
-                        <h6>当前路径</h6>
-                        <nav aria-label="breadcrumb">
-                            <ol class="breadcrumb breadcrumb-sm">
-                                <li class="breadcrumb-item">
-                                    <a href="#" @click="navigateToPath('')">根目录</a>
-                                </li>
-                                <li v-for="(part, index) in pathParts" :key="index" class="breadcrumb-item">
-                                    <a href="#" @click="navigateToPath(getPathUpTo(index))">{{ part }}</a>
-                                </li>
-                            </ol>
-                        </nav>
+                    <!-- 目录树 -->
+                    <div class="mb-4" v-if="selectedBucket">
+                        <h6>目录树</h6>
+                        <div class="border rounded bg-white p-2" style="max-height: calc(100vh - 260px); overflow:auto;">
+                            <ul class="list-unstyled mb-0">
+                                <tree-node
+                                  v-for="node in treeRoots"
+                                  :key="node.path || '/'"
+                                  :node="node"
+                                  :current-path="currentPath"
+                                  @navigate="onTreeNavigate"
+                                  @load="loadTreeChildren"
+                                ></tree-node>
+                            </ul>
+                        </div>
                     </div>
                 </div>
                 
@@ -161,10 +160,10 @@
                     <div class="d-flex justify-content-between align-items-center mb-4">
                         <h3>文件管理</h3>
                         <div>
-                            <button class="btn btn-outline-success me-2" @click="showUploadModal = true">
+                            <button class="btn btn-outline-success me-2" @click="openModal('uploadModal')">
                                 <i class="bi bi-upload"></i> 上传文件
                             </button>
-                            <button class="btn btn-outline-primary" @click="showFolderModal = true">
+                            <button class="btn btn-outline-primary" @click="openModal('folderModal')">
                                 <i class="bi bi-folder-plus"></i> 新建文件夹
                             </button>
                         </div>
@@ -179,11 +178,14 @@
                             </div>
                             <div>
                                 <!-- 搜索框 -->
-                                <div class="input-group input-group-sm" style="width: 250px;">
-                                    <input type="text" class="form-control" placeholder="搜索文件..."
+                                <div class="input-group input-group-sm" style="width: 320px;">
+                                    <input type="text" class="form-control" placeholder="搜索文件（回车执行服务端搜索）"
                                            v-model="searchKeyword" @keyup.enter="searchFiles">
-                                    <button class="btn btn-outline-secondary" @click="searchFiles">
+                                    <button class="btn btn-outline-secondary" @click="searchFiles" :disabled="!searchKeyword.trim()">
                                         <i class="bi bi-search"></i>
+                                    </button>
+                                    <button class="btn btn-outline-secondary" @click="searchKeyword=''; loadFiles()" :disabled="!searchKeyword">
+                                        <i class="bi bi-x-lg"></i>
                                     </button>
                                 </div>
                             </div>
@@ -228,12 +230,38 @@
                               {{ currentPath || '/' }}
                             </div>
                             <!-- 文件表格 -->
+                            <div v-if="selectedFiles.length > 0" class="alert alert-info d-flex justify-content-between align-items-center py-2 px-2 my-2">
+                              <div>已选中 {{ selectedFiles.length }} 个文件</div>
+                              <div>
+                                <button class="btn btn-sm btn-outline-danger" @click="batchDeleteFiles">
+                                  <i class="bi bi-trash"></i> 删除选中
+                                </button>
+                              </div>
+                            </div>
                             <div class="file-table">
                               <div class="file-header d-flex align-items-center px-2 py-1 border-bottom text-secondary small fw-bold">
+                                <div style="width:28px" class="text-center">
+                                  <input type="checkbox" class="form-check-input" :checked="allVisibleSelected" @change.prevent="toggleSelectAll">
+                                </div>
                                 <div style="width:32px"></div>
-                                <div class="flex-grow-1">文件名</div>
-                                <div style="width:100px">大小</div>
-                                <div style="width:160px">修改时间</div>
+                                <div class="flex-grow-1">
+                                  <a href="#" class="text-decoration-none text-body" @click.prevent="setSort('name')">
+                                    文件名
+                                    <i class="bi ms-1" :class="sortKey==='name' ? (sortDir==='asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill') : 'bi-filter'"></i>
+                                  </a>
+                                </div>
+                                <div style="width:100px" class="text-end">
+                                  <a href="#" class="text-decoration-none text-body" @click.prevent="setSort('size')">
+                                    大小
+                                    <i class="bi ms-1" :class="sortKey==='size' ? (sortDir==='asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill') : 'bi-filter'"></i>
+                                  </a>
+                                </div>
+                                <div style="width:160px">
+                                  <a href="#" class="text-decoration-none text-body" @click.prevent="setSort('lastModified')">
+                                    修改时间
+                                    <i class="bi ms-1" :class="sortKey==='lastModified' ? (sortDir==='asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill') : 'bi-filter'"></i>
+                                  </a>
+                                </div>
                                 <div style="width:120px"></div>
                               </div>
                               <div v-for="(item, idx) in sortedFiles" :key="item.key"
@@ -241,6 +269,11 @@
                                    :class="{'even-row': idx % 2 === 0, 'odd-row': idx % 2 === 1}"
                                    @dblclick="item.isFolder ? navigateToPath(item.key) : null"
                                    :title="item.name">
+                                <div style="width:28px" class="text-center">
+                                  <input v-if="!item.isFolder" type="checkbox" class="form-check-input"
+                                         :checked="selectedFiles.some(f => f.key === item.key)"
+                                         @change.stop="toggleFileSelection(item)">
+                                </div>
                                 <div style="width:32px">
                                   <i :class="item.isFolder ? 'bi bi-folder-fill text-secondary' : getFileIcon(item.name)" style="font-size:1.2em"></i>
                                 </div>
@@ -248,13 +281,13 @@
                                   <span class="fw-bold" v-if="item.isFolder">{{ item.name }}</span>
                                   <span v-else>{{ item.name }}</span>
                                 </div>
-                                <div style="width:100px" class="text-end text-muted small" v-if="!item.isFolder">{{ formatFileSize(item.size) }}</div>
-                                <div style="width:160px" class="text-muted small">{{ formatDate(item.lastModified) }}</div>
+                                <div style="width:100px" class="text-end text-muted small">{{ item.isFolder ? '' : formatFileSize(item.size) }}</div>
+                                <div style="width:160px" class="text-muted small">{{ item.isFolder ? '' : formatDate(item.lastModified) }}</div>
                                 <div style="width:120px" class="text-end">
                                   <button v-if="!item.isFolder" class="btn btn-link btn-sm p-0 me-2" @click.stop="downloadFile(item)" title="下载">
                                     <i class="bi bi-download"></i>
                                   </button>
-                                  <button v-if="!item.isFolder" class="btn btn-link btn-sm p-0 me-2" @click.stop="previewFile(item)" title="预览">
+                                  <button v-if="!item.isFolder" class="btn btn-link btn-sm p-0 me-2" @click.stop="doPreviewFile(item)" title="预览">
                                     <i class="bi bi-eye"></i>
                                   </button>
                                   <button class="btn btn-link btn-sm p-0 text-danger" @click.stop="deleteFile(item)" title="删除">
@@ -286,6 +319,10 @@
                             .text-truncate { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
                             </style>
                             
+                            <div v-if="!loading && files.length === 0" class="text-center text-muted py-4">
+                              <i class="bi bi-inbox" style="font-size:2rem;"></i>
+                              <div class="mt-2">此目录暂无文件</div>
+                            </div>
                             <!-- 加载更多按钮 -->
                             <div v-if="pagination.hasMore" class="text-center mt-3">
                                 <button class="btn btn-outline-primary" 
@@ -311,12 +348,12 @@
         </div>
         
         <!-- 配置模态框 -->
-        <div class="modal fade" id="configModal" tabindex="-1" v-show="showConfigModal">
+        <div class="modal fade" id="configModal" tabindex="-1">
             <div class="modal-dialog">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title">存储配置</h5>
-                        <button type="button" class="btn-close" @click="showConfigModal = false"></button>
+                        <button type="button" class="btn-close" @click="hideModal('configModal')"></button>
                     </div>
                     <div class="modal-body">
                         <form @submit.prevent="saveConfig">
@@ -369,12 +406,12 @@
         </div>
         
         <!-- 上传模态框 -->
-        <div class="modal fade" id="uploadModal" tabindex="-1" v-show="showUploadModal">
+        <div class="modal fade" id="uploadModal" tabindex="-1">
             <div class="modal-dialog">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title">上传文件</h5>
-                        <button type="button" class="btn-close" @click="showUploadModal = false"></button>
+                        <button type="button" class="btn-close" @click="hideModal('uploadModal')"></button>
                     </div>
                     <div class="modal-body">
                         <div class="upload-area" 
@@ -407,7 +444,7 @@
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                        <button type="button" class="btn btn-primary" @click="uploadFiles" :disabled="uploadFiles.length === 0">
+                        <button type="button" class="btn btn-primary" @click="doUploadFiles" :disabled="uploadFiles.length === 0">
                             上传
                         </button>
                     </div>
@@ -416,12 +453,12 @@
         </div>
         
         <!-- 新建文件夹模态框 -->
-        <div class="modal fade" id="folderModal" tabindex="-1" v-show="showFolderModal">
+        <div class="modal fade" id="folderModal" tabindex="-1">
             <div class="modal-dialog">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title">新建文件夹</h5>
-                        <button type="button" class="btn-close" @click="showFolderModal = false"></button>
+                        <button type="button" class="btn-close" @click="hideModal('folderModal')"></button>
                     </div>
                     <div class="modal-body">
                         <div class="mb-3">
@@ -431,7 +468,7 @@
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                        <button type="button" class="btn btn-primary" @click="createFolder">创建</button>
+                        <button type="button" class="btn btn-primary" @click="createFolder" :disabled="!folderName || !folderName.trim()">创建</button>
                     </div>
                 </div>
             </div>
