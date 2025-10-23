@@ -7,6 +7,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -15,12 +16,21 @@ import java.util.List;
 @RestController
 @Slf4j
 public class DemoController {
-    public static final OpenAiChatModel model = OpenAiChatModel.builder()
-            .baseUrl("https://api.siliconflow.cn")
-            .apiKey("sk-nfcjvrdsczvnkplcdcdprvhpzclbahcxgjjkhafawmzzftiq")
-            .modelName("Qwen/Qwen2.5-VL-72B-Instruct")
-            .build();
+
+    private final OpenAiChatModel model;
     private final SystemMessage systemMessage = SystemMessage.from("你是一个天气预报助手，回答用户关于天气的问题。");
+
+    public DemoController(
+            @Value("${langchain4j.open-ai.chat-model.api-key}") String apiKey,
+            @Value("${langchain4j.open-ai.chat-model.base-url}") String baseUrl,
+            @Value("${langchain4j.open-ai.chat-model.model-name}") String modelName) {
+        this.model = OpenAiChatModel.builder()
+                .baseUrl(baseUrl)
+                .apiKey(apiKey)
+                .modelName(modelName)
+                .build();
+        log.info("OpenAI Chat Model initialized with base URL: {}, model: {}", baseUrl, modelName);
+    }
 
     @GetMapping("/hello")
     public String hello() {
