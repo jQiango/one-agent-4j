@@ -11,11 +11,11 @@
     </parent>
     
     <groupId>com.all.in</groupId>
-    <artifactId>one-agent-4j-ai</artifactId>
+    <artifactId>one-agent-4j</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <packaging>jar</packaging>
-    <name>one-agent-4j-ai</name>
-    <description>one-agent-4j-ai single Spring Boot application</description>
+    <name>one-agent-4j</name>
+    <description>基于 Spring Boot + LangChain4J 的 AI Agent 应用</description>
     
 
     
