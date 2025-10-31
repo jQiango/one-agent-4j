@@ -50,4 +50,45 @@ public class DemoController {
         return chat.aiMessage().text();
     }
 
+    // ========== 异常测试接口 ==========
+
+    /**
+     * 测试 NullPointerException
+     */
+    @GetMapping("/test/null-pointer")
+    public String testNullPointer() {
+        log.info("测试 NullPointerException");
+        String str = null;
+        return str.length() + ""; // 触发 NullPointerException
+    }
+
+    /**
+     * 测试 ArrayIndexOutOfBoundsException
+     */
+    @GetMapping("/test/array-index")
+    public String testArrayIndex() {
+        log.info("测试 ArrayIndexOutOfBoundsException");
+        int[] arr = {1, 2, 3};
+        return arr[10] + ""; // 触发 ArrayIndexOutOfBoundsException
+    }
+
+    /**
+     * 测试 ArithmeticException
+     */
+    @GetMapping("/test/arithmetic")
+    public String testArithmetic() {
+        log.info("测试 ArithmeticException");
+        int result = 10 / 0; // 触发 ArithmeticException
+        return result + "";
+    }
+
+    /**
+     * 测试 RuntimeException
+     */
+    @GetMapping("/test/runtime")
+    public String testRuntime() {
+        log.info("测试 RuntimeException");
+        throw new RuntimeException("这是一个运行时异常");
+    }
+
 }

@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(mvn clean install:*)"
+      "Bash(mvn clean install:*)",
+      "Bash(tree:*)",
+      "WebSearch",
+      "Bash(mvn dependency:tree:*)",
+      "WebFetch(domain:docs.langchain4j.dev)",
+      "Bash(copy:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []
