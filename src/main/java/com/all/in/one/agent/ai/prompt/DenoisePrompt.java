@@ -2,15 +2,26 @@ package com.all.in.one.agent.ai.prompt;
 
 import com.all.in.one.agent.common.model.ExceptionInfo;
 import com.all.in.one.agent.dao.entity.ExceptionRecord;
+import lombok.extern.slf4j.Slf4j;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * AI 去噪提示词模板
  *
  * @author One Agent 4J
  */
+@Slf4j
 public class DenoisePrompt {
+
+    private static final String TEMPLATE_PATH = "/prompts/denoise-prompt-template.txt";
+    private static String templateCache = null;
 
     /**
      * 构建去噪判断的提示词
@@ -20,68 +31,87 @@ public class DenoisePrompt {
      * @return 提示词
      */
     public static String buildPrompt(ExceptionInfo newException, List<ExceptionRecord> recentExceptions) {
-        StringBuilder prompt = new StringBuilder();
+        String template = loadTemplate();
 
-        prompt.append("# 任务说明\n");
-        prompt.append("你是一个异常监控系统的智能去噪助手。你的任务是判断新发生的异常是否需要报警。\n\n");
-
-        prompt.append("# 判断标准\n");
-        prompt.append("1. **重复异常**: 如果新异常与最近的历史异常高度相似（相同类型、相同位置、相同原因），应该判定为重复，不需要重复报警\n");
-        prompt.append("2. **频繁异常**: 如果短时间内发生了大量相同或相似的异常，可能是系统性问题，建议合并报警\n");
-        prompt.append("3. **新异常**: 如果是新类型的异常或在新位置发生的异常，应该报警\n");
-        prompt.append("4. **严重程度变化**: 如果异常的影响范围或严重程度发生变化，应该重新报警\n\n");
-
-        prompt.append("# 新异常信息\n");
-        prompt.append("```\n");
-        prompt.append("应用名称: ").append(newException.getAppName()).append("\n");
-        prompt.append("环境: ").append(newException.getEnvironment()).append("\n");
-        prompt.append("异常类型: ").append(newException.getExceptionType()).append("\n");
-        prompt.append("异常消息: ").append(newException.getExceptionMessage()).append("\n");
-        prompt.append("错误位置: ").append(newException.getErrorLocation()).append("\n");
-        prompt.append("发生时间: ").append(newException.getOccurredAt()).append("\n");
+        // 构建请求信息部分
+        String requestInfo = "";
         if (newException.getRequestInfo() != null) {
-            prompt.append("请求URI: ").append(newException.getRequestInfo().getUri()).append("\n");
+            requestInfo = "请求URI: " + newException.getRequestInfo().getUri() + "\n";
         }
-        prompt.append("堆栈摘要:\n");
-        prompt.append(truncateStackTrace(newException.getStackTrace(), 10)).append("\n");
-        prompt.append("```\n\n");
 
-        prompt.append("# 最近2分钟内的历史异常记录\n");
-        if (recentExceptions.isEmpty()) {
-            prompt.append("（无历史记录，这是首次发生的异常）\n\n");
-        } else {
-            prompt.append("共 ").append(recentExceptions.size()).append(" 条历史记录:\n\n");
-            for (int i = 0; i < recentExceptions.size() && i < 10; i++) {
-                ExceptionRecord record = recentExceptions.get(i);
-                prompt.append("## 历史异常 #").append(i + 1).append("\n");
-                prompt.append("```\n");
-                prompt.append("ID: ").append(record.getId()).append("\n");
-                prompt.append("异常类型: ").append(record.getExceptionType()).append("\n");
-                prompt.append("异常消息: ").append(record.getExceptionMessage()).append("\n");
-                prompt.append("错误位置: ").append(record.getErrorLocation()).append("\n");
-                prompt.append("发生时间: ").append(record.getOccurredAt()).append("\n");
-                prompt.append("指纹: ").append(record.getFingerprint()).append("\n");
-                prompt.append("```\n\n");
+        // 构建历史异常部分
+        String historySection = buildHistorySection(recentExceptions);
+
+        // 替换模板变量
+        return template
+                .replace("{{appName}}", nullSafe(newException.getAppName()))
+                .replace("{{environment}}", nullSafe(newException.getEnvironment()))
+                .replace("{{exceptionType}}", nullSafe(newException.getExceptionType()))
+                .replace("{{exceptionMessage}}", nullSafe(newException.getExceptionMessage()))
+                .replace("{{errorLocation}}", nullSafe(newException.getErrorLocation()))
+                .replace("{{occurredAt}}", nullSafe(newException.getOccurredAt()))
+                .replace("{{requestInfo}}", requestInfo)
+                .replace("{{stackTrace}}", truncateStackTrace(newException.getStackTrace(), 10))
+                .replace("{{historySection}}", historySection);
+    }
+
+    /**
+     * 加载模板文件
+     */
+    private static String loadTemplate() {
+        if (templateCache != null) {
+            return templateCache;
+        }
+
+        try (InputStream is = DenoisePrompt.class.getResourceAsStream(TEMPLATE_PATH)) {
+            if (is == null) {
+                log.error("无法找到提示词模板文件: {}", TEMPLATE_PATH);
+                throw new RuntimeException("提示词模板文件不存在: " + TEMPLATE_PATH);
             }
+
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                templateCache = reader.lines().collect(Collectors.joining("\n"));
+                log.info("成功加载提示词模板，长度: {} 字符", templateCache.length());
+                return templateCache;
+            }
+        } catch (IOException e) {
+            log.error("读取提示词模板文件失败: {}", TEMPLATE_PATH, e);
+            throw new RuntimeException("读取提示词模板文件失败", e);
+        }
+    }
+
+    /**
+     * 构建历史异常部分
+     */
+    private static String buildHistorySection(List<ExceptionRecord> recentExceptions) {
+        if (recentExceptions.isEmpty()) {
+            return "（无历史记录，这是首次发生的异常）\n";
         }
 
-        prompt.append("# 输出要求\n");
-        prompt.append("请以 JSON 格式返回你的判断结果，格式如下:\n");
-        prompt.append("```json\n");
-        prompt.append("{\n");
-        prompt.append("  \"shouldAlert\": true/false,           // 是否应该报警\n");
-        prompt.append("  \"isDuplicate\": true/false,          // 是否是重复异常\n");
-        prompt.append("  \"similarityScore\": 0.0-1.0,         // 与历史异常的相似度\n");
-        prompt.append("  \"suggestedSeverity\": \"P0/P1/P2/P3/P4\", // 建议的严重级别\n");
-        prompt.append("  \"reason\": \"判断原因的简短说明\",\n");
-        prompt.append("  \"relatedExceptionIds\": [1, 2, 3],   // 相关的历史异常ID列表\n");
-        prompt.append("  \"suggestion\": \"给运维人员的建议\"\n");
-        prompt.append("}\n");
-        prompt.append("```\n\n");
+        StringBuilder history = new StringBuilder();
+        history.append("共 ").append(recentExceptions.size()).append(" 条历史记录:\n\n");
 
-        prompt.append("请只返回 JSON，不要包含其他内容。\n");
+        for (int i = 0; i < recentExceptions.size() && i < 10; i++) {
+            ExceptionRecord record = recentExceptions.get(i);
+            history.append("## 历史异常 #").append(i + 1).append("\n");
+            history.append("```\n");
+            history.append("ID: ").append(record.getId()).append("\n");
+            history.append("异常类型: ").append(record.getExceptionType()).append("\n");
+            history.append("异常消息: ").append(nullSafe(record.getExceptionMessage())).append("\n");
+            history.append("错误位置: ").append(nullSafe(record.getErrorLocation())).append("\n");
+            history.append("发生时间: ").append(record.getOccurredAt()).append("\n");
+            history.append("指纹: ").append(record.getFingerprint()).append("\n");
+            history.append("```\n\n");
+        }
 
-        return prompt.toString();
+        return history.toString();
+    }
+
+    /**
+     * 空值安全转换
+     */
+    private static String nullSafe(Object obj) {
+        return obj == null ? "" : obj.toString();
     }
 
     /**

@@ -16,7 +16,7 @@ public interface DenoiseAiService {
     /**
      * 判断异常是否需要报警
      *
-     * @param prompt 包含新异常和历史异常的完整提示词
+     * @param prompt 包含新异常和历史异常的完整提示词（从资源文件加载）
      * @return AI 的 JSON 响应
      */
     @SystemMessage("""

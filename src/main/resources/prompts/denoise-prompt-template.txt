@@ -1,0 +1,39 @@
+# 任务说明
+判断新发生的异常是否需要报警。
+
+# 判断标准
+1. **重复异常**: 如果新异常与最近的历史异常高度相似（相同类型、相同位置、相同原因），应该判定为重复，不需要重复报警
+2. **频繁异常**: 如果短时间内发生了大量相同或相似的异常，可能是系统性问题，建议合并报警
+3. **新异常**: 如果是新类型的异常或在新位置发生的异常，应该报警
+4. **严重程度变化**: 如果异常的影响范围或严重程度发生变化，应该重新报警
+
+# 新异常信息
+```
+应用名称: {{appName}}
+环境: {{environment}}
+异常类型: {{exceptionType}}
+异常消息: {{exceptionMessage}}
+错误位置: {{errorLocation}}
+发生时间: {{occurredAt}}
+{{requestInfo}}堆栈摘要:
+{{stackTrace}}
+```
+
+# 最近2分钟内的历史异常记录
+{{historySection}}
+
+# 输出要求
+请以 JSON 格式返回你的判断结果，格式如下:
+```json
+{
+  "shouldAlert": true/false,           // 是否应该报警
+  "isDuplicate": true/false,          // 是否是重复异常
+  "similarityScore": 0.0-1.0,         // 与历史异常的相似度
+  "suggestedSeverity": "P0/P1/P2/P3/P4", // 建议的严重级别
+  "reason": "判断原因的简短说明",
+  "relatedExceptionIds": [1, 2, 3],   // 相关的历史异常ID列表
+  "suggestion": "给运维人员的建议"
+}
+```
+
+请只返回 JSON，不要包含其他内容。

@@ -28,6 +28,12 @@ public class ExceptionCollector {
     private final Random random = new Random();
     private final List<Consumer<ExceptionInfo>> listeners = new ArrayList<>();
 
+    /**
+     * ThreadLocal 防止递归捕获
+     * 当一个线程正在处理异常时，该线程产生的新异常不会再次被捕获
+     */
+    private static final ThreadLocal<Boolean> PROCESSING = ThreadLocal.withInitial(() -> false);
+
     public ExceptionCollector(AgentProperties properties, ExceptionReporter reporter) {
         this.properties = properties;
         this.reporter = reporter;
@@ -59,7 +65,16 @@ public class ExceptionCollector {
             return;
         }
 
+        // 防止递归捕获：如果当前线程正在处理异常，则不再处理新异常
+        if (PROCESSING.get()) {
+            log.debug("检测到递归异常捕获，跳过处理 - exceptionType={}", throwable.getClass().getSimpleName());
+            return;
+        }
+
         try {
+            // 标记当前线程正在处理异常
+            PROCESSING.set(true);
+
             // 1. 检查是否忽略该异常（基础过滤）
             if (shouldIgnore(throwable)) {
                 log.debug("异常被忽略规则过滤 - exceptionType={}", throwable.getClass().getSimpleName());
@@ -94,6 +109,9 @@ public class ExceptionCollector {
 
         } catch (Exception e) {
             log.error("收集异常信息失败", e);
+        } finally {
+            // 清除标记，允许该线程处理后续的新异常
+            PROCESSING.remove();
         }
     }
 
