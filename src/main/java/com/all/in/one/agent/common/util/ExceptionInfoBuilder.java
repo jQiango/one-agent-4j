@@ -78,6 +78,8 @@ public class ExceptionInfoBuilder {
                 .errorLine(errorLine)
                 .errorLocation(errorLocation)
                 .threadInfo(threadInfo)
+                .traceId(extractTraceId())
+                .spanId(extractSpanId())
                 .context(new HashMap<>())
                 .occurredAt(Instant.now())
                 .reportedAt(Instant.now())
@@ -138,5 +140,53 @@ public class ExceptionInfoBuilder {
      */
     private static String generateInstanceId(String appName, String hostname) {
         return appName + "@" + hostname;
+    }
+
+    /**
+     * 提取 TraceId
+     * 尝试从 HTTP 上下文、MDC 等来源获取
+     */
+    private static String extractTraceId() {
+        // 1. 尝试从 HTTP 上下文获取
+        try {
+            Class<?> contextHolderClass = Class.forName(
+                "com.all.in.one.agent.starter.logging.HttpLogContextHolder");
+            java.lang.reflect.Method getContextMethod = contextHolderClass.getMethod("getContext");
+            Object context = getContextMethod.invoke(null);
+
+            if (context != null) {
+                java.lang.reflect.Method getTraceIdMethod = context.getClass().getMethod("getTraceId");
+                return (String) getTraceIdMethod.invoke(context);
+            }
+        } catch (Exception e) {
+            // Ignore - HttpLogFilter may not be enabled
+        }
+
+        // 2. 尝试从 MDC 获取
+        try {
+            Class<?> mdcClass = Class.forName("org.slf4j.MDC");
+            java.lang.reflect.Method getMethod = mdcClass.getMethod("get", String.class);
+            String traceId = (String) getMethod.invoke(null, "traceId");
+            if (traceId != null && !traceId.isEmpty()) {
+                return traceId;
+            }
+        } catch (Exception e) {
+            // Ignore - MDC not available
+        }
+
+        return null;
+    }
+
+    /**
+     * 提取 SpanId
+     */
+    private static String extractSpanId() {
+        try {
+            Class<?> mdcClass = Class.forName("org.slf4j.MDC");
+            java.lang.reflect.Method getMethod = mdcClass.getMethod("get", String.class);
+            return (String) getMethod.invoke(null, "spanId");
+        } catch (Exception e) {
+            return null;
+        }
     }
 }

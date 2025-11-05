@@ -5,8 +5,14 @@ import com.all.in.one.agent.starter.capture.ExceptionCaptureAspect;
 import com.all.in.one.agent.starter.capture.ExceptionCaptureFilter;
 import com.all.in.one.agent.starter.capture.GlobalExceptionHandler;
 import com.all.in.one.agent.starter.collector.ExceptionCollector;
+import com.all.in.one.agent.starter.dedup.FingerprintDeduplicator;
+import com.all.in.one.agent.starter.filter.IgnoreListFilter;
+import com.all.in.one.agent.starter.logging.HttpLogFilter;
+import com.all.in.one.agent.starter.logging.HttpLogProperties;
 import com.all.in.one.agent.starter.reporter.ExceptionReporter;
+import com.all.in.one.agent.starter.rule.RuleEngine;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
@@ -73,8 +79,11 @@ public class AgentAutoConfiguration {
 
     @Bean
     public ExceptionCollector exceptionCollector(AgentProperties properties,
-                                                   ExceptionReporter reporter) {
-        return new ExceptionCollector(properties, reporter);
+                                                   ExceptionReporter reporter,
+                                                   IgnoreListFilter ignoreListFilter,
+                                                   FingerprintDeduplicator fingerprintDeduplicator,
+                                                   @Autowired(required = false) RuleEngine ruleEngine) {
+        return new ExceptionCollector(properties, reporter, ignoreListFilter, fingerprintDeduplicator, ruleEngine);
     }
 
     /**
@@ -115,5 +124,23 @@ public class AgentAutoConfiguration {
                                                           AgentProperties properties) {
         log.info("注册 ExceptionCaptureAspect");
         return new ExceptionCaptureAspect(collector, properties);
+    }
+
+    /**
+     * 注册 HTTP 请求日志过滤器 (需要 Web 应用)
+     */
+    @Bean
+    @ConditionalOnWebApplication
+    @ConditionalOnProperty(prefix = "one-agent.http-log", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public FilterRegistrationBean<HttpLogFilter> httpLogFilter(HttpLogProperties httpLogProperties) {
+        FilterRegistrationBean<HttpLogFilter> registration = new FilterRegistrationBean<>();
+        registration.setFilter(new HttpLogFilter(httpLogProperties));
+        registration.addUrlPatterns("/*");
+        registration.setName("httpLogFilter");
+        registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 1);  // 在 ExceptionCaptureFilter 之后
+
+        log.info("注册 HttpLogFilter");
+
+        return registration;
     }
 }

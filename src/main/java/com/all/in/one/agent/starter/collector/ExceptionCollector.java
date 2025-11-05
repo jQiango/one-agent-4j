@@ -3,8 +3,12 @@ package com.all.in.one.agent.starter.collector;
 import com.all.in.one.agent.common.config.AgentProperties;
 import com.all.in.one.agent.common.model.ExceptionInfo;
 import com.all.in.one.agent.common.util.ExceptionInfoBuilder;
+import com.all.in.one.agent.starter.dedup.FingerprintDeduplicator;
+import com.all.in.one.agent.starter.filter.IgnoreListFilter;
 import com.all.in.one.agent.starter.reporter.ExceptionReporter;
+import com.all.in.one.agent.starter.rule.RuleEngine;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -25,6 +29,9 @@ public class ExceptionCollector {
 
     private final AgentProperties properties;
     private final ExceptionReporter reporter;
+    private final IgnoreListFilter ignoreListFilter;
+    private final FingerprintDeduplicator fingerprintDeduplicator;
+    private final RuleEngine ruleEngine;
     private final Random random = new Random();
     private final List<Consumer<ExceptionInfo>> listeners = new ArrayList<>();
 
@@ -34,13 +41,21 @@ public class ExceptionCollector {
      */
     private static final ThreadLocal<Boolean> PROCESSING = ThreadLocal.withInitial(() -> false);
 
-    public ExceptionCollector(AgentProperties properties, ExceptionReporter reporter) {
+    public ExceptionCollector(AgentProperties properties,
+                             ExceptionReporter reporter,
+                             IgnoreListFilter ignoreListFilter,
+                             FingerprintDeduplicator fingerprintDeduplicator,
+                             RuleEngine ruleEngine) {
         this.properties = properties;
         this.reporter = reporter;
-        log.info("ExceptionCollector 初始化完成 - appName={}, environment={}, samplingRate={}",
+        this.ignoreListFilter = ignoreListFilter;
+        this.fingerprintDeduplicator = fingerprintDeduplicator;
+        this.ruleEngine = ruleEngine;
+        log.info("ExceptionCollector 初始化完成 - appName={}, environment={}, samplingRate={}, ruleEngineEnabled={}",
                 properties.getAppName(),
                 properties.getEnvironment(),
-                properties.getSamplingRate());
+                properties.getSamplingRate(),
+                ruleEngine != null);
     }
 
     /**
@@ -75,9 +90,9 @@ public class ExceptionCollector {
             // 标记当前线程正在处理异常
             PROCESSING.set(true);
 
-            // 1. 检查是否忽略该异常（基础过滤）
-            if (shouldIgnore(throwable)) {
-                log.debug("异常被忽略规则过滤 - exceptionType={}", throwable.getClass().getSimpleName());
+            // 1. 第一阶段：基于 Throwable 的快速过滤（保留旧逻辑，过滤明显不需要的异常）
+            if (shouldIgnoreByThrowable(throwable)) {
+                log.debug("异常被快速过滤（Throwable 级别） - exceptionType={}", throwable.getClass().getSimpleName());
                 return;
             }
 
@@ -88,12 +103,42 @@ public class ExceptionCollector {
                     properties.getEnvironment()
             );
 
+            // 3. 第 0 层：基础过滤（基于完整的 ExceptionInfo 进行更精细的过滤）
+            if (ignoreListFilter.shouldIgnore(exceptionInfo)) {
+                log.debug("异常被第 0 层过滤 - fingerprint={}, type={}, location={}",
+                        exceptionInfo.getFingerprint(),
+                        exceptionInfo.getExceptionType(),
+                        exceptionInfo.getErrorLocation());
+                return;
+            }
+
+            // 4. 第 1 层：指纹去重（时间窗口内相同指纹的异常只处理一次）
+            if (fingerprintDeduplicator.isDuplicate(exceptionInfo)) {
+                log.debug("异常被第 1 层过滤 (重复) - fingerprint={}, type={}, location={}",
+                        exceptionInfo.getFingerprint(),
+                        exceptionInfo.getExceptionType(),
+                        exceptionInfo.getErrorLocation());
+                return;
+            }
+
+            // 4.5. 第 1.5 层：规则引擎（基于业务规则的过滤）
+            if (ruleEngine != null) {
+                RuleEngine.FilterResult ruleResult = ruleEngine.evaluate(exceptionInfo);
+                if (ruleResult.isFiltered()) {
+                    log.info("异常被规则引擎过滤 - fingerprint={}, rule={}, reason={}",
+                            exceptionInfo.getFingerprint(),
+                            ruleResult.getRuleName(),
+                            ruleResult.getReason());
+                    return;
+                }
+            }
+
             log.info("收集到异常 - fingerprint={}, type={}, location={}",
                     exceptionInfo.getFingerprint(),
                     exceptionInfo.getExceptionType(),
                     exceptionInfo.getErrorLocation());
 
-            // 3. HTTP 上报（可选）
+            // 5. HTTP 上报（可选）
             if (properties.getStorageStrategy().isEnableHttpReport()) {
                 // 注意：采样率可以在 HTTP 上报时使用，避免上报过多数据
                 if (shouldSample()) {
@@ -103,8 +148,8 @@ public class ExceptionCollector {
                 }
             }
 
-            // 4. 通知监听器（本地持久化等 - AI 判断在这里进行）
-            // AI 会决定是否真正需要持久化和生成工单
+            // 6. 通知监听器（本地持久化等）
+            // 注意：第 2 层 AI 去噪在持久化阶段进行，AI 会决定是否真正需要持久化和生成工单
             notifyListeners(exceptionInfo);
 
         } catch (Exception e) {
@@ -144,9 +189,10 @@ public class ExceptionCollector {
     }
 
     /**
-     * 是否应该忽略该异常
+     * 基于 Throwable 的快速过滤（保留旧逻辑）
+     * 在构建 ExceptionInfo 之前进行快速判断，避免不必要的堆栈解析
      */
-    private boolean shouldIgnore(Throwable throwable) {
+    private boolean shouldIgnoreByThrowable(Throwable throwable) {
         String exceptionClassName = throwable.getClass().getName();
 
         // 检查忽略的异常类型

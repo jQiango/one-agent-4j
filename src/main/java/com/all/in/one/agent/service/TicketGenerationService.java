@@ -217,6 +217,29 @@ public class TicketGenerationService {
     }
 
     /**
+     * 基于 ExceptionInfo 计算严重程度（供规则引擎使用）
+     */
+    public String calculateSeverity(com.all.in.one.agent.common.model.ExceptionInfo exceptionInfo) {
+        String exceptionType = exceptionInfo.getExceptionType();
+        String environment = exceptionInfo.getEnvironment();
+
+        // 生产环境提升一个级别
+        boolean isProduction = "prod".equalsIgnoreCase(environment);
+
+        if (exceptionType.contains("OutOfMemory") || exceptionType.contains("StackOverflow")) {
+            return "P0"; // 致命
+        } else if (exceptionType.contains("SQLException") || exceptionType.contains("DataAccess")) {
+            return isProduction ? "P0" : "P1"; // 数据库异常
+        } else if (exceptionType.contains("Timeout")) {
+            return isProduction ? "P1" : "P2"; // 超时
+        } else if (exceptionType.contains("NullPointer") || exceptionType.contains("IllegalArgument")) {
+            return isProduction ? "P2" : "P3"; // 空指针/参数异常
+        } else {
+            return isProduction ? "P3" : "P4"; // 其他异常
+        }
+    }
+
+    /**
      * 计算期望解决时间
      * P0: 30分钟
      * P1: 2小时
