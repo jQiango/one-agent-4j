@@ -4,8 +4,8 @@ import com.all.in.one.agent.ai.model.DenoiseDecision;
 import com.all.in.one.agent.ai.service.AiDenoiseService;
 import com.all.in.one.agent.common.config.AgentProperties;
 import com.all.in.one.agent.common.model.ExceptionInfo;
-import com.all.in.one.agent.dao.entity.ExceptionRecord;
-import com.all.in.one.agent.dao.mapper.ExceptionRecordMapper;
+import com.all.in.one.agent.dao.entity.AppAlarmRecord;
+import com.all.in.one.agent.dao.mapper.AppAlarmRecordMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -27,7 +27,7 @@ public class ExceptionProcessService {
     private final AgentProperties properties;
     private final ExceptionPersistenceService persistenceService;
     private final TicketGenerationService ticketGenerationService;
-    private final ExceptionRecordMapper exceptionRecordMapper;
+    private final AppAlarmRecordMapper appAlarmRecordMapper;
 
     @Autowired(required = false)
     private AiDenoiseService aiDenoiseService;
@@ -35,11 +35,11 @@ public class ExceptionProcessService {
     public ExceptionProcessService(AgentProperties properties,
                                     ExceptionPersistenceService persistenceService,
                                     TicketGenerationService ticketGenerationService,
-                                    ExceptionRecordMapper exceptionRecordMapper) {
+                                    AppAlarmRecordMapper appAlarmRecordMapper) {
         this.properties = properties;
         this.persistenceService = persistenceService;
         this.ticketGenerationService = ticketGenerationService;
-        this.exceptionRecordMapper = exceptionRecordMapper;
+        this.appAlarmRecordMapper = appAlarmRecordMapper;
         log.info("ExceptionProcessService 初始化完成 - enableLocalPersistence={}, enableTicketGeneration={}",
                 properties.getStorageStrategy().isEnableLocalPersistence(),
                 properties.getStorageStrategy().isEnableTicketGeneration());
@@ -93,15 +93,15 @@ public class ExceptionProcessService {
                 return;
             }
 
-            // 2. 查询异常记录
-            ExceptionRecord exceptionRecord = exceptionRecordMapper.selectById(exceptionRecordId);
-            if (exceptionRecord == null) {
-                log.error("查询异常记录失败 - id={}", exceptionRecordId);
+            // 2. 查询告警记录
+            AppAlarmRecord appAlarmRecord = appAlarmRecordMapper.selectById(exceptionRecordId);
+            if (appAlarmRecord == null) {
+                log.error("查询告警记录失败 - id={}", exceptionRecordId);
                 return;
             }
 
             // 3. 生成工单（可以使用 AI 建议的严重级别）
-            Long ticketId = ticketGenerationService.generateTicket(exceptionRecord, denoiseDecision);
+            Long ticketId = ticketGenerationService.generateTicket(appAlarmRecord, denoiseDecision);
             if (ticketId != null) {
                 log.info("异常处理完成 - exceptionRecordId={}, ticketId={}, fingerprint={}, aiSuggestion={}",
                         exceptionRecordId, ticketId, exceptionInfo.getFingerprint(),

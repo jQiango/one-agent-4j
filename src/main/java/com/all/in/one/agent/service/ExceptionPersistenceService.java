@@ -1,8 +1,8 @@
 package com.all.in.one.agent.service;
 
 import com.all.in.one.agent.common.model.ExceptionInfo;
-import com.all.in.one.agent.dao.entity.ExceptionRecord;
-import com.all.in.one.agent.dao.mapper.ExceptionRecordMapper;
+import com.all.in.one.agent.dao.entity.AppAlarmRecord;
+import com.all.in.one.agent.dao.mapper.AppAlarmRecordMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -20,12 +20,12 @@ import java.time.ZoneId;
 @Service
 public class ExceptionPersistenceService {
 
-    private final ExceptionRecordMapper exceptionRecordMapper;
+    private final AppAlarmRecordMapper appAlarmRecordMapper;
     private final ObjectMapper objectMapper;
 
-    public ExceptionPersistenceService(ExceptionRecordMapper exceptionRecordMapper,
+    public ExceptionPersistenceService(AppAlarmRecordMapper appAlarmRecordMapper,
                                        ObjectMapper objectMapper) {
-        this.exceptionRecordMapper = exceptionRecordMapper;
+        this.appAlarmRecordMapper = appAlarmRecordMapper;
         this.objectMapper = objectMapper;
         log.info("ExceptionPersistenceService 初始化完成");
     }
@@ -38,23 +38,23 @@ public class ExceptionPersistenceService {
      */
     public Long saveException(ExceptionInfo exceptionInfo) {
         try {
-            ExceptionRecord record = convertToEntity(exceptionInfo);
-            exceptionRecordMapper.insert(record);
-            log.info("异常记录已保存 - id={}, fingerprint={}, exceptionType={}",
+            AppAlarmRecord record = convertToEntity(exceptionInfo);
+            appAlarmRecordMapper.insert(record);
+            log.info("告警记录已保存 - id={}, fingerprint={}, exceptionType={}",
                     record.getId(), record.getFingerprint(), record.getExceptionType());
             return record.getId();
         } catch (Exception e) {
-            log.error("保存异常记录失败 - fingerprint={}, error={}",
+            log.error("保存告警记录失败 - fingerprint={}, error={}",
                     exceptionInfo.getFingerprint(), e.getMessage(), e);
             return null;
         }
     }
 
     /**
-     * 转换 ExceptionInfo 到 ExceptionRecord 实体
+     * 转换 ExceptionInfo 到 AppAlarmRecord 实体
      */
-    private ExceptionRecord convertToEntity(ExceptionInfo exceptionInfo) {
-        ExceptionRecord record = new ExceptionRecord();
+    private AppAlarmRecord convertToEntity(ExceptionInfo exceptionInfo) {
+        AppAlarmRecord record = new AppAlarmRecord();
 
         // 应用信息
         record.setAppName(exceptionInfo.getAppName());

@@ -1,9 +1,9 @@
 package com.all.in.one.agent.service;
 
 import com.all.in.one.agent.ai.model.DenoiseDecision;
-import com.all.in.one.agent.dao.entity.ExceptionRecord;
-import com.all.in.one.agent.dao.entity.Ticket;
-import com.all.in.one.agent.dao.mapper.TicketMapper;
+import com.all.in.one.agent.dao.entity.AppAlarmRecord;
+import com.all.in.one.agent.dao.entity.AppAlarmTicket;
+import com.all.in.one.agent.dao.mapper.AppAlarmTicketMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -21,56 +21,56 @@ import java.util.concurrent.atomic.AtomicLong;
 @Service
 public class TicketGenerationService {
 
-    private final TicketMapper ticketMapper;
+    private final AppAlarmTicketMapper appAlarmTicketMapper;
     private static final AtomicLong ticketSequence = new AtomicLong(0);
     private static final DateTimeFormatter TICKET_NO_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
 
-    public TicketGenerationService(TicketMapper ticketMapper) {
-        this.ticketMapper = ticketMapper;
+    public TicketGenerationService(AppAlarmTicketMapper appAlarmTicketMapper) {
+        this.appAlarmTicketMapper = appAlarmTicketMapper;
         log.info("TicketGenerationService 初始化完成");
     }
 
     /**
-     * 根据异常记录生成工单
+     * 根据告警记录生成工单
      *
-     * @param exceptionRecord 异常记录
+     * @param appAlarmRecord 告警记录
      * @return 工单ID，如果工单已存在则返回null
      */
-    public Long generateTicket(ExceptionRecord exceptionRecord) {
-        return generateTicket(exceptionRecord, null);
+    public Long generateTicket(AppAlarmRecord appAlarmRecord) {
+        return generateTicket(appAlarmRecord, null);
     }
 
     /**
-     * 根据异常记录生成工单（支持 AI 建议）
+     * 根据告警记录生成工单（支持 AI 建议）
      *
-     * @param exceptionRecord 异常记录
+     * @param appAlarmRecord 告警记录
      * @param aiDecision AI 去噪判断结果（可选）
      * @return 工单ID，如果工单已存在则返回null
      */
-    public Long generateTicket(ExceptionRecord exceptionRecord, DenoiseDecision aiDecision) {
+    public Long generateTicket(AppAlarmRecord appAlarmRecord, DenoiseDecision aiDecision) {
         try {
             // 检查该异常指纹是否已经有未关闭的工单
-            LambdaQueryWrapper<Ticket> queryWrapper = new LambdaQueryWrapper<>();
-            queryWrapper.eq(Ticket::getExceptionFingerprint, exceptionRecord.getFingerprint())
-                    .notIn(Ticket::getStatus, "CLOSED")
-                    .orderByDesc(Ticket::getCreatedAt)
+            LambdaQueryWrapper<AppAlarmTicket> queryWrapper = new LambdaQueryWrapper<>();
+            queryWrapper.eq(AppAlarmTicket::getExceptionFingerprint, appAlarmRecord.getFingerprint())
+                    .notIn(AppAlarmTicket::getStatus, "CLOSED")
+                    .orderByDesc(AppAlarmTicket::getCreatedAt)
                     .last("LIMIT 1");
 
-            Ticket existingTicket = ticketMapper.selectOne(queryWrapper);
+            AppAlarmTicket existingTicket = appAlarmTicketMapper.selectOne(queryWrapper);
 
             if (existingTicket != null) {
                 // 工单已存在，更新发生次数和最后发生时间
                 existingTicket.setOccurrenceCount(existingTicket.getOccurrenceCount() + 1);
-                existingTicket.setLastOccurredAt(exceptionRecord.getOccurredAt());
-                ticketMapper.updateById(existingTicket);
+                existingTicket.setLastOccurredAt(appAlarmRecord.getOccurredAt());
+                appAlarmTicketMapper.updateById(existingTicket);
                 log.info("更新已有工单 - ticketNo={}, occurrenceCount={}",
                         existingTicket.getTicketNo(), existingTicket.getOccurrenceCount());
                 return existingTicket.getId();
             }
 
             // 创建新工单（使用 AI 建议）
-            Ticket ticket = buildTicket(exceptionRecord, aiDecision);
-            ticketMapper.insert(ticket);
+            AppAlarmTicket ticket = buildTicket(appAlarmRecord, aiDecision);
+            appAlarmTicketMapper.insert(ticket);
             log.info("新工单已生成 - ticketNo={}, exceptionType={}, severity={}, aiSuggested={}",
                     ticket.getTicketNo(), ticket.getExceptionType(), ticket.getSeverity(),
                     aiDecision != null ? aiDecision.getSuggestedSeverity() : "N/A");
@@ -78,7 +78,7 @@ public class TicketGenerationService {
 
         } catch (Exception e) {
             log.error("生成工单失败 - fingerprint={}, error={}",
-                    exceptionRecord.getFingerprint(), e.getMessage(), e);
+                    appAlarmRecord.getFingerprint(), e.getMessage(), e);
             return null;
         }
     }
@@ -86,39 +86,39 @@ public class TicketGenerationService {
     /**
      * 构建工单对象
      */
-    private Ticket buildTicket(ExceptionRecord exceptionRecord, DenoiseDecision aiDecision) {
-        Ticket ticket = new Ticket();
+    private AppAlarmTicket buildTicket(AppAlarmRecord appAlarmRecord, DenoiseDecision aiDecision) {
+        AppAlarmTicket ticket = new AppAlarmTicket();
 
         // 工单编号
         ticket.setTicketNo(generateTicketNo());
 
         // 关联异常
-        ticket.setExceptionRecordId(exceptionRecord.getId());
-        ticket.setExceptionFingerprint(exceptionRecord.getFingerprint());
+        ticket.setExceptionRecordId(appAlarmRecord.getId());
+        ticket.setExceptionFingerprint(appAlarmRecord.getFingerprint());
 
         // 服务信息
-        ticket.setServiceName(exceptionRecord.getAppName());
-        ticket.setEnvironment(exceptionRecord.getEnvironment());
+        ticket.setServiceName(appAlarmRecord.getAppName());
+        ticket.setEnvironment(appAlarmRecord.getEnvironment());
 
         // 问题信息
-        ticket.setTitle(generateTitle(exceptionRecord));
-        ticket.setProblemType(determineProblemType(exceptionRecord));
+        ticket.setTitle(generateTitle(appAlarmRecord));
+        ticket.setProblemType(determineProblemType(appAlarmRecord));
         ticket.setProblemCategory("EXCEPTION");
 
         // 使用 AI 建议的严重级别，如果没有则使用自动计算的
         String severity = (aiDecision != null && aiDecision.getSuggestedSeverity() != null)
                 ? aiDecision.getSuggestedSeverity()
-                : calculateSeverity(exceptionRecord);
+                : calculateSeverity(appAlarmRecord);
         ticket.setSeverity(severity);
 
         // 异常内容
-        ticket.setExceptionType(exceptionRecord.getExceptionType());
-        ticket.setExceptionMessage(exceptionRecord.getExceptionMessage());
-        ticket.setStackTrace(exceptionRecord.getStackTrace());
-        ticket.setErrorLocation(exceptionRecord.getErrorLocation());
+        ticket.setExceptionType(appAlarmRecord.getExceptionType());
+        ticket.setExceptionMessage(appAlarmRecord.getExceptionMessage());
+        ticket.setStackTrace(appAlarmRecord.getStackTrace());
+        ticket.setErrorLocation(appAlarmRecord.getErrorLocation());
         ticket.setOccurrenceCount(1);
-        ticket.setFirstOccurredAt(exceptionRecord.getOccurredAt());
-        ticket.setLastOccurredAt(exceptionRecord.getOccurredAt());
+        ticket.setFirstOccurredAt(appAlarmRecord.getOccurredAt());
+        ticket.setLastOccurredAt(appAlarmRecord.getOccurredAt());
 
         // 责任人（后续可以根据服务配置自动分配）
         ticket.setServiceOwner(null);
@@ -157,9 +157,9 @@ public class TicketGenerationService {
     /**
      * 生成工单标题
      */
-    private String generateTitle(ExceptionRecord exceptionRecord) {
-        String exceptionType = exceptionRecord.getExceptionType();
-        String location = exceptionRecord.getErrorLocation();
+    private String generateTitle(AppAlarmRecord appAlarmRecord) {
+        String exceptionType = appAlarmRecord.getExceptionType();
+        String location = appAlarmRecord.getErrorLocation();
         if (location != null && location.length() > 50) {
             location = location.substring(0, 50) + "...";
         }
@@ -169,8 +169,8 @@ public class TicketGenerationService {
     /**
      * 判断问题类型
      */
-    private String determineProblemType(ExceptionRecord exceptionRecord) {
-        String exceptionType = exceptionRecord.getExceptionType();
+    private String determineProblemType(AppAlarmRecord appAlarmRecord) {
+        String exceptionType = appAlarmRecord.getExceptionType();
         if (exceptionType.contains("NullPointer")) {
             return "空指针异常";
         } else if (exceptionType.contains("SQLException") || exceptionType.contains("DataAccess")) {
@@ -196,9 +196,9 @@ public class TicketGenerationService {
      * P3: 较低 - 空指针、参数异常
      * P4: 轻微 - 其他运行时异常
      */
-    private String calculateSeverity(ExceptionRecord exceptionRecord) {
-        String exceptionType = exceptionRecord.getExceptionType();
-        String environment = exceptionRecord.getEnvironment();
+    private String calculateSeverity(AppAlarmRecord appAlarmRecord) {
+        String exceptionType = appAlarmRecord.getExceptionType();
+        String environment = appAlarmRecord.getEnvironment();
 
         // 生产环境提升一个级别
         boolean isProduction = "prod".equalsIgnoreCase(environment);

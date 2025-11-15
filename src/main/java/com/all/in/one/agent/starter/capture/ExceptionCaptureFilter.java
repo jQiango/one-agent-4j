@@ -33,23 +33,64 @@ public class ExceptionCaptureFilter implements Filter {
 
         try {
             chain.doFilter(request, response);
-        } catch (Throwable throwable) {
-            log.warn("Filter 捕获到异常 - uri={}, error={}",
-                    getRequestUri(request),
-                    throwable.getMessage());
+        } catch (ServletException servletException) {
+            // ServletException 通常是包装异常,原始异常已被 ControllerAdvice 处理
+            // 只记录真正的 Filter 层异常(非 ServletException 包装的异常)
+            Throwable rootCause = getRootCause(servletException);
 
-            // 收集异常
-            collector.collect(throwable);
-
-            // 继续抛出，让其他异常处理器处理
-            if (throwable instanceof IOException) {
-                throw (IOException) throwable;
-            } else if (throwable instanceof ServletException) {
-                throw (ServletException) throwable;
+            // 只有当根因异常是 Filter 链中产生的(不是来自 Controller)时才记录
+            if (!isControllerException(rootCause)) {
+                log.warn("Filter 捕获到异常 - uri={}, error={}",
+                        getRequestUri(request),
+                        servletException.getMessage());
+                collector.collect(rootCause);
             } else {
-                throw new ServletException(throwable);
+                log.debug("Filter 检测到 Controller 异常,已由 ControllerAdvice 处理,跳过记录 - uri={}",
+                        getRequestUri(request));
+            }
+
+            throw servletException;
+        } catch (IOException ioException) {
+            // IO 异常(如连接断开)应该记录
+            log.warn("Filter 捕获到 IO 异常 - uri={}, error={}",
+                    getRequestUri(request),
+                    ioException.getMessage());
+            collector.collect(ioException);
+            throw ioException;
+        }
+    }
+
+    /**
+     * 获取根因异常
+     */
+    private Throwable getRootCause(Throwable throwable) {
+        Throwable rootCause = throwable;
+        while (rootCause.getCause() != null && rootCause.getCause() != rootCause) {
+            rootCause = rootCause.getCause();
+        }
+        return rootCause;
+    }
+
+    /**
+     * 判断是否是 Controller 层的异常
+     * Controller 层异常的堆栈中会包含 DispatcherServlet
+     */
+    private boolean isControllerException(Throwable throwable) {
+        StackTraceElement[] stackTrace = throwable.getStackTrace();
+        if (stackTrace == null || stackTrace.length == 0) {
+            return false;
+        }
+
+        // 检查堆栈中是否包含 DispatcherServlet.doDispatch
+        // 这表示异常来自 Controller 处理过程
+        for (StackTraceElement element : stackTrace) {
+            String className = element.getClassName();
+            if (className.contains("DispatcherServlet") &&
+                element.getMethodName().equals("doDispatch")) {
+                return true;
             }
         }
+        return false;
     }
 
     private String getRequestUri(ServletRequest request) {

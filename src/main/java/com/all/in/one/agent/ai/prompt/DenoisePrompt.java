@@ -1,7 +1,7 @@
 package com.all.in.one.agent.ai.prompt;
 
 import com.all.in.one.agent.common.model.ExceptionInfo;
-import com.all.in.one.agent.dao.entity.ExceptionRecord;
+import com.all.in.one.agent.dao.entity.AppAlarmRecord;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.BufferedReader;
@@ -27,10 +27,10 @@ public class DenoisePrompt {
      * 构建去噪判断的提示词
      *
      * @param newException     新发生的异常
-     * @param recentExceptions 最近 N 分钟内的历史异常
+     * @param recentExceptions 最近 N 分钟内的历史告警
      * @return 提示词
      */
-    public static String buildPrompt(ExceptionInfo newException, List<ExceptionRecord> recentExceptions) {
+    public static String buildPrompt(ExceptionInfo newException, List<AppAlarmRecord> recentExceptions) {
         String template = loadTemplate();
 
         // 构建请求信息部分
@@ -81,9 +81,9 @@ public class DenoisePrompt {
     }
 
     /**
-     * 构建历史异常部分
+     * 构建历史告警部分
      */
-    private static String buildHistorySection(List<ExceptionRecord> recentExceptions) {
+    private static String buildHistorySection(List<AppAlarmRecord> recentExceptions) {
         if (recentExceptions.isEmpty()) {
             return "（无历史记录，这是首次发生的异常）\n";
         }
@@ -92,8 +92,8 @@ public class DenoisePrompt {
         history.append("共 ").append(recentExceptions.size()).append(" 条历史记录:\n\n");
 
         for (int i = 0; i < recentExceptions.size() && i < 10; i++) {
-            ExceptionRecord record = recentExceptions.get(i);
-            history.append("## 历史异常 #").append(i + 1).append("\n");
+            AppAlarmRecord record = recentExceptions.get(i);
+            history.append("## 历史告警 #").append(i + 1).append("\n");
             history.append("```\n");
             history.append("ID: ").append(record.getId()).append("\n");
             history.append("异常类型: ").append(record.getExceptionType()).append("\n");

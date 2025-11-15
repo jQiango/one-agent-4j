@@ -1,4 +1,15 @@
--- One Agent 4J 数据库初始化脚本
+-- ================================================
+-- One Agent 4J 数据库初始化脚本 (完整版)
+-- ================================================
+-- 版本: 2.0.0
+-- 更新时间: 2025-11-07
+-- 说明: 基于最新 POJO 对象生成,完全匹配 Java 实体类字段
+--       - AppAlarmRecord.java (26 字段)
+--       - AppAlarmTicket.java (34 字段)
+-- ================================================
+
+-- 删除已存在的数据库 (谨慎使用!)
+-- DROP DATABASE IF EXISTS one_agent;
 
 -- 创建数据库
 CREATE DATABASE IF NOT EXISTS one_agent DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -6,9 +17,12 @@ CREATE DATABASE IF NOT EXISTS one_agent DEFAULT CHARACTER SET utf8mb4 COLLATE ut
 USE one_agent;
 
 -- ================================================
--- 1. 异常记录表
+-- 1. 告警记录表
 -- ================================================
-CREATE TABLE IF NOT EXISTS exception_record (
+DROP TABLE IF EXISTS app_alarm_record;
+
+CREATE TABLE app_alarm_record (
+    -- 主键
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
 
     -- 应用信息
@@ -45,21 +59,32 @@ CREATE TABLE IF NOT EXISTS exception_record (
     span_id VARCHAR(64) COMMENT 'SpanId',
 
     -- 时间信息
-    occurred_at TIMESTAMP NOT NULL COMMENT '发生时间',
-    reported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '上报时间',
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    occurred_at DATETIME NOT NULL COMMENT '发生时间',
+    reported_at DATETIME NOT NULL COMMENT '上报时间',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
 
+    -- AI 去噪相关
+    ai_processed BOOLEAN DEFAULT FALSE COMMENT 'AI是否已处理',
+    ai_decision VARCHAR(32) COMMENT 'AI决策结果: ALERT/IGNORE',
+    ai_reason TEXT COMMENT 'AI决策原因',
+
+    -- 索引
     INDEX idx_app_env (app_name, environment),
     INDEX idx_fingerprint (fingerprint),
     INDEX idx_exception_type (exception_type),
     INDEX idx_occurred_at (occurred_at),
-    INDEX idx_created_at (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='异常记录表';
+    INDEX idx_created_at (created_at),
+    INDEX idx_ai_processed (ai_processed)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='告警记录表';
 
 -- ================================================
--- 2. 工单表
+-- 2. 告警工单表
 -- ================================================
-CREATE TABLE IF NOT EXISTS ticket (
+DROP TABLE IF EXISTS app_alarm_ticket;
+
+CREATE TABLE app_alarm_ticket (
+    -- 主键
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '工单ID',
     ticket_no VARCHAR(64) UNIQUE NOT NULL COMMENT '工单编号',
 
@@ -83,8 +108,8 @@ CREATE TABLE IF NOT EXISTS ticket (
     stack_trace TEXT COMMENT '堆栈信息',
     error_location VARCHAR(512) COMMENT '错误位置',
     occurrence_count INT DEFAULT 1 COMMENT '发生次数',
-    first_occurred_at TIMESTAMP NOT NULL COMMENT '首次发生时间',
-    last_occurred_at TIMESTAMP NOT NULL COMMENT '最后发生时间',
+    first_occurred_at DATETIME NOT NULL COMMENT '首次发生时间',
+    last_occurred_at DATETIME NOT NULL COMMENT '最后发生时间',
 
     -- 责任人
     service_owner VARCHAR(64) COMMENT '项目负责人',
@@ -96,10 +121,10 @@ CREATE TABLE IF NOT EXISTS ticket (
     progress INT DEFAULT 0 COMMENT '处理进度 0-100',
 
     -- 处理时间
-    assigned_at TIMESTAMP NULL COMMENT '分派时间',
-    started_at TIMESTAMP NULL COMMENT '开始处理时间',
-    resolved_at TIMESTAMP NULL COMMENT '解决时间',
-    closed_at TIMESTAMP NULL COMMENT '关闭时间',
+    assigned_at DATETIME NULL COMMENT '分派时间',
+    started_at DATETIME NULL COMMENT '开始处理时间',
+    resolved_at DATETIME NULL COMMENT '解决时间',
+    closed_at DATETIME NULL COMMENT '关闭时间',
 
     -- 处理方案
     solution TEXT COMMENT '处理方案',
@@ -107,7 +132,7 @@ CREATE TABLE IF NOT EXISTS ticket (
     root_cause TEXT COMMENT '根因',
 
     -- SLA
-    expected_resolve_time TIMESTAMP COMMENT '期望解决时间',
+    expected_resolve_time DATETIME COMMENT '期望解决时间',
     actual_resolve_duration INT COMMENT '实际解决耗时(分钟)',
     sla_breached BOOLEAN DEFAULT FALSE COMMENT '是否超时',
 
@@ -115,44 +140,77 @@ CREATE TABLE IF NOT EXISTS ticket (
     remark TEXT COMMENT '备注',
 
     -- 审计字段
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
 
+    -- 索引
     INDEX idx_ticket_no (ticket_no),
     INDEX idx_exception (exception_record_id),
     INDEX idx_fingerprint (exception_fingerprint),
     INDEX idx_service (service_name, environment),
     INDEX idx_status (status, severity),
     INDEX idx_assignee (assignee),
-    INDEX idx_created_at (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='工单表';
+    INDEX idx_created_at (created_at),
+    INDEX idx_severity (severity)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='告警工单表';
 
 -- ================================================
--- 3. 工单状态历史表
+-- 3. 告警工单状态历史表
 -- ================================================
-CREATE TABLE IF NOT EXISTS ticket_status_history (
+DROP TABLE IF EXISTS app_alarm_ticket_history;
+
+CREATE TABLE app_alarm_ticket_history (
+    -- 主键
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
     ticket_id BIGINT NOT NULL COMMENT '工单ID',
     ticket_no VARCHAR(64) NOT NULL COMMENT '工单编号',
 
+    -- 状态变更
     from_status VARCHAR(32) COMMENT '原状态',
     to_status VARCHAR(32) NOT NULL COMMENT '新状态',
 
+    -- 操作信息
     operator VARCHAR(64) NOT NULL COMMENT '操作人',
     operation_type VARCHAR(32) NOT NULL COMMENT '操作类型',
     comment TEXT COMMENT '操作备注',
 
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    -- 审计字段
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
 
+    -- 索引
     INDEX idx_ticket_id (ticket_id),
     INDEX idx_ticket_no (ticket_no),
     INDEX idx_created_at (created_at)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='工单状态历史表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='告警工单状态历史表';
 
 -- ================================================
--- 初始化数据
+-- 验证表创建
 -- ================================================
+SHOW TABLES;
 
--- 插入测试数据（可选）
--- INSERT INTO exception_record (app_name, environment, exception_type, exception_message, fingerprint, error_location, occurred_at, reported_at)
--- VALUES ('one-agent-test-app', 'dev', 'NullPointerException', 'Test exception', 'test_fingerprint', 'TestClass.testMethod:10', NOW(), NOW());
+-- 验证 app_alarm_record 表结构
+DESC app_alarm_record;
+
+-- 验证 app_alarm_ticket 表结构
+DESC app_alarm_ticket;
+
+-- 验证 app_alarm_ticket_history 表结构
+DESC app_alarm_ticket_history;
+
+-- ================================================
+-- 初始化完成提示
+-- ================================================
+SELECT '========================================' AS '';
+SELECT '✅ One Agent 4J 数据库初始化完成!' AS 'Status';
+SELECT '========================================' AS '';
+SELECT '' AS '';
+SELECT '已创建的表:' AS '';
+SELECT '  1. app_alarm_record - 告警记录表' AS '';
+SELECT '  2. app_alarm_ticket - 告警工单表' AS '';
+SELECT '  3. app_alarm_ticket_history - 告警工单状态历史表' AS '';
+SELECT '' AS '';
+SELECT '数据库: one_agent' AS '';
+SELECT '字符集: utf8mb4' AS '';
+SELECT '排序规则: utf8mb4_unicode_ci' AS '';
+SELECT '' AS '';
+SELECT '========================================' AS '';

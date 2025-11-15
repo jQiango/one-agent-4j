@@ -33,3 +33,5 @@ build/
 .vscode/
 .claude/*
 /key
+/application.properties
+/.claude/

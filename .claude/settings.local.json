@@ -14,7 +14,11 @@
       "Bash(cat:*)",
       "Bash(dir:*)",
       "Bash(nul)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(rm:*)",
+      "Bash(git mv:*)",
+      "Bash(find:*)",
+      "Bash(javac:*)"
     ],
     "deny": [],
     "ask": []

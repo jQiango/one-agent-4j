@@ -8,13 +8,13 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 /**
- * 工单实体
+ * 告警工单实体
  *
  * @author One Agent 4J
  */
 @Data
-@TableName("ticket")
-public class Ticket {
+@TableName("app_alarm_ticket")
+public class AppAlarmTicket {
 
     @TableId(type = IdType.AUTO)
     private Long id;

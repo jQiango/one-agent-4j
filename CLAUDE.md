@@ -83,7 +83,12 @@ The system implements a **capture → collect → denoise → persist → ticket
 Three parallel capture mechanisms feed exceptions into the collector:
 
 - **`ExceptionCaptureFilter`**: Servlet filter (highest precedence) catches HTTP-level exceptions
+  - **Smart Deduplication**: Detects Controller exceptions by checking for `DispatcherServlet.doDispatch` in stack trace
+  - Only records Filter-layer exceptions (IO errors, etc.)
+  - Skips Controller exceptions already handled by `GlobalExceptionHandler` to prevent duplicates
 - **`GlobalExceptionHandler`**: `@ControllerAdvice` handles controller exceptions
+  - Primary handler for Controller-layer exceptions
+  - Records exceptions before Filter layer sees them
 - **`ExceptionCaptureAspect`**: AOP intercepts service layer exceptions
   - Default pointcut: `execution(* com.*.*.*.service..*.*(..))`
   - Configurable via `one-agent.capture-config.aop-pointcut`

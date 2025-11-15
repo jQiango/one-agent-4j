@@ -4,8 +4,8 @@ import com.all.in.one.agent.ai.config.AiDenoiseProperties;
 import com.all.in.one.agent.ai.model.DenoiseDecision;
 import com.all.in.one.agent.ai.prompt.DenoisePrompt;
 import com.all.in.one.agent.common.model.ExceptionInfo;
-import com.all.in.one.agent.dao.entity.ExceptionRecord;
-import com.all.in.one.agent.dao.mapper.ExceptionRecordMapper;
+import com.all.in.one.agent.dao.entity.AppAlarmRecord;
+import com.all.in.one.agent.dao.mapper.AppAlarmRecordMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -37,7 +37,7 @@ import java.util.concurrent.TimeUnit;
 @ConditionalOnProperty(prefix = "one-agent.ai-denoise", name = "enabled", havingValue = "true")
 public class AiDenoiseService {
 
-    private final ExceptionRecordMapper exceptionRecordMapper;
+    private final AppAlarmRecordMapper appAlarmRecordMapper;
     private final DenoiseAiService denoiseAiService;
     private final ObjectMapper objectMapper;
     private final AiDenoiseProperties properties;
@@ -51,11 +51,11 @@ public class AiDenoiseService {
     private long totalAiCall = 0;
     private long totalFiltered = 0;
 
-    public AiDenoiseService(ExceptionRecordMapper exceptionRecordMapper,
+    public AiDenoiseService(AppAlarmRecordMapper appAlarmRecordMapper,
                             DenoiseAiService denoiseAiService,
                             ObjectMapper objectMapper,
                             AiDenoiseProperties properties) {
-        this.exceptionRecordMapper = exceptionRecordMapper;
+        this.appAlarmRecordMapper = appAlarmRecordMapper;
         this.denoiseAiService = denoiseAiService;
         this.objectMapper = objectMapper;
         this.properties = properties;
@@ -74,7 +74,7 @@ public class AiDenoiseService {
             log.info("AI 决策缓存已禁用");
         }
 
-        log.info("AI 智能去噪服务已启动 - lookbackMinutes={}, maxHistoryRecords={}, cacheEnabled={}",
+        log.info("AI 智能去噪服务已启动 - look back Minutes={}, maxHistoryRecords={}, cacheEnabled={}",
                 properties.getLookbackMinutes(),
                 properties.getMaxHistoryRecords(),
                 properties.isCacheEnabled());
@@ -108,9 +108,9 @@ public class AiDenoiseService {
             log.debug("开始 AI 去噪判断 - fingerprint={}, exceptionType={}, location={}",
                     fingerprint, exceptionInfo.getExceptionType(), exceptionInfo.getErrorLocation());
 
-            // 2. 查询最近的历史异常
-            List<ExceptionRecord> recentExceptions = queryRecentExceptions(exceptionInfo);
-            log.debug("查询到最近 {} 分钟内的历史异常: {} 条",
+            // 2. 查询最近的历史告警
+            List<AppAlarmRecord> recentExceptions = queryRecentExceptions(exceptionInfo);
+            log.debug("查询到最近 {} 分钟内的历史告警: {} 条",
                     properties.getLookbackMinutes(), recentExceptions.size());
 
             // 3. 构建提示词
@@ -164,15 +164,15 @@ public class AiDenoiseService {
     }
 
     /**
-     * 查询最近的历史异常
+     * 查询最近的历史告警
      */
-    private List<ExceptionRecord> queryRecentExceptions(ExceptionInfo exceptionInfo) {
+    private List<AppAlarmRecord> queryRecentExceptions(ExceptionInfo exceptionInfo) {
         LocalDateTime startTime = LocalDateTime.ofInstant(
                 exceptionInfo.getOccurredAt().minusSeconds(properties.getLookbackMinutes() * 60L),
                 ZoneId.systemDefault()
         );
 
-        return exceptionRecordMapper.findRecentExceptions(
+        return appAlarmRecordMapper.findRecentExceptions(
                 exceptionInfo.getAppName(),
                 startTime,
                 properties.getMaxHistoryRecords()
