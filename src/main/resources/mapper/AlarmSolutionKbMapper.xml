@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.all.in.one.agent.dao.mapper.AlarmSolutionKbMapper">
+
+    <resultMap id="BaseResultMap" type="com.all.in.one.agent.dao.entity.AlarmSolutionKb">
+        <id column="id" property="id"/>
+        <result column="exception_fingerprint" property="exceptionFingerprint"/>
+        <result column="exception_type" property="exceptionType"/>
+        <result column="service_name" property="serviceName"/>
+        <result column="problem_summary" property="problemSummary"/>
+        <result column="problem_symptoms" property="problemSymptoms"/>
+        <result column="problem_impact" property="problemImpact"/>
+        <result column="solution_type" property="solutionType"/>
+        <result column="solution_steps" property="solutionSteps"/>
+        <result column="solution_code" property="solutionCode"/>
+        <result column="root_cause" property="rootCause"/>
+        <result column="prevent_measures" property="preventMeasures"/>
+        <result column="resolver" property="resolver"/>
+        <result column="resolver_name" property="resolverName"/>
+        <result column="resolved_at" property="resolvedAt"/>
+        <result column="resolve_duration_minutes" property="resolveDurationMinutes"/>
+        <result column="effectiveness_score" property="effectivenessScore"/>
+        <result column="usage_count" property="usageCount"/>
+        <result column="success_count" property="successCount"/>
+        <result column="ai_extracted" property="aiExtracted"/>
+        <result column="ai_confidence" property="aiConfidence"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <select id="selectByFingerprint" resultMap="BaseResultMap">
+        SELECT *
+        FROM alarm_solution_kb
+        WHERE exception_fingerprint = #{fingerprint}
+        ORDER BY effectiveness_score DESC, usage_count DESC
+        LIMIT 10
+    </select>
+
+    <select id="selectTopRatedSolutions" resultMap="BaseResultMap">
+        SELECT *
+        FROM alarm_solution_kb
+        WHERE effectiveness_score >= 4
+        ORDER BY effectiveness_score DESC, usage_count DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectSimilarSolutions" resultMap="BaseResultMap">
+        SELECT *
+        FROM alarm_solution_kb
+        WHERE service_name = #{serviceName}
+          AND exception_type LIKE CONCAT('%', #{exceptionType}, '%')
+        ORDER BY effectiveness_score DESC, usage_count DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

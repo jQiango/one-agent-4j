@@ -18,7 +18,12 @@
       "Bash(rm:*)",
       "Bash(git mv:*)",
       "Bash(find:*)",
-      "Bash(javac:*)"
+      "Bash(javac:*)",
+      "Bash(git rm:*)",
+      "Bash(powershell -Command:*)",
+      "Bash(.\\mvnw.cmd clean compile:*)",
+      "Bash(./mvnw.cmd clean compile:*)",
+      "Bash(del:*)"
     ],
     "deny": [],
     "ask": []

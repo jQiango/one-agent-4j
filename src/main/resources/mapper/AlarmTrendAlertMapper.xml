@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.all.in.one.agent.dao.mapper.AlarmTrendAlertMapper">
+
+    <resultMap id="BaseResultMap" type="com.all.in.one.agent.dao.entity.AlarmTrendAlert">
+        <id column="id" property="id"/>
+        <result column="alert_type" property="alertType"/>
+        <result column="service_name" property="serviceName"/>
+        <result column="exception_type" property="exceptionType"/>
+        <result column="previous_count" property="previousCount"/>
+        <result column="current_count" property="currentCount"/>
+        <result column="change_rate" property="changeRate"/>
+        <result column="alert_title" property="alertTitle"/>
+        <result column="alert_message" property="alertMessage"/>
+        <result column="severity" property="severity"/>
+        <result column="prediction_data" property="predictionData"/>
+        <result column="status" property="status"/>
+        <result column="handled_by" property="handledBy"/>
+        <result column="handled_at" property="handledAt"/>
+        <result column="handle_comment" property="handleComment"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <!-- 查询待处理的预警 -->
+    <select id="selectPendingAlerts" resultMap="BaseResultMap">
+        SELECT *
+        FROM alarm_trend_alert
+        WHERE status = 'PENDING'
+        ORDER BY created_at DESC
+        LIMIT 100
+    </select>
+
+    <!-- 查询最近的预警记录 -->
+    <select id="selectRecentAlerts" resultMap="BaseResultMap">
+        SELECT *
+        FROM alarm_trend_alert
+        WHERE created_at >= DATE_SUB(NOW(), INTERVAL #{hours} HOUR)
+        ORDER BY created_at DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.all.in.one.agent.dao.mapper.AlarmTrendStatMapper">
+
+    <resultMap id="BaseResultMap" type="com.all.in.one.agent.dao.entity.AlarmTrendStat">
+        <id column="id" property="id"/>
+        <result column="stat_date" property="statDate"/>
+        <result column="stat_hour" property="statHour"/>
+        <result column="service_name" property="serviceName"/>
+        <result column="exception_type" property="exceptionType"/>
+        <result column="environment" property="environment"/>
+        <result column="exception_count" property="exceptionCount"/>
+        <result column="unique_fingerprint_count" property="uniqueFingerprintCount"/>
+        <result column="affected_user_count" property="affectedUserCount"/>
+        <result column="p0_count" property="p0Count"/>
+        <result column="p1_count" property="p1Count"/>
+        <result column="p2_count" property="p2Count"/>
+        <result column="p3_count" property="p3Count"/>
+        <result column="p4_count" property="p4Count"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <!-- 查询指定日期范围的统计数据 -->
+    <select id="selectByDateRange" resultMap="BaseResultMap">
+        SELECT *
+        FROM alarm_trend_stat
+        WHERE stat_date BETWEEN #{startDate} AND #{endDate}
+          AND stat_hour IS NULL
+        <if test="serviceName != null and serviceName != ''">
+          AND service_name = #{serviceName}
+        </if>
+        ORDER BY stat_date ASC
+    </select>
+
+    <!-- 查询小时统计数据 -->
+    <select id="selectHourlyStats" resultMap="BaseResultMap">
+        SELECT *
+        FROM alarm_trend_stat
+        WHERE stat_date = #{date}
+          AND stat_hour IS NOT NULL
+        <if test="serviceName != null and serviceName != ''">
+          AND service_name = #{serviceName}
+        </if>
+        ORDER BY stat_hour ASC
+    </select>
+
+    <!-- 聚合每日统计 -->
+    <insert id="aggregateDailyStat">
+        INSERT INTO alarm_trend_stat
+        (stat_date, service_name, exception_type, environment,
+         exception_count, unique_fingerprint_count, affected_user_count,
+         p0_count, p1_count, p2_count, p3_count, p4_count)
+        SELECT
+            DATE(occurred_at) as stat_date,
+            app_name as service_name,
+            exception_type,
+            environment,
+            COUNT(*) as exception_count,
+            COUNT(DISTINCT fingerprint) as unique_fingerprint_count,
+            0 as affected_user_count,
+            SUM(CASE WHEN severity = 'P0' THEN 1 ELSE 0 END) as p0_count,
+            SUM(CASE WHEN severity = 'P1' THEN 1 ELSE 0 END) as p1_count,
+            SUM(CASE WHEN severity = 'P2' THEN 1 ELSE 0 END) as p2_count,
+            SUM(CASE WHEN severity = 'P3' THEN 1 ELSE 0 END) as p3_count,
+            SUM(CASE WHEN severity = 'P4' THEN 1 ELSE 0 END) as p4_count
+        FROM app_alarm_record
+        WHERE DATE(occurred_at) = #{date}
+        GROUP BY DATE(occurred_at), app_name, exception_type, environment
+        ON DUPLICATE KEY UPDATE
+            exception_count = VALUES(exception_count),
+            unique_fingerprint_count = VALUES(unique_fingerprint_count),
+            p0_count = VALUES(p0_count),
+            p1_count = VALUES(p1_count),
+            p2_count = VALUES(p2_count),
+            p3_count = VALUES(p3_count),
+            p4_count = VALUES(p4_count),
+            updated_at = CURRENT_TIMESTAMP
+    </insert>
+
+    <!-- 聚合小时统计 -->
+    <insert id="aggregateHourlyStat">
+        INSERT INTO alarm_trend_stat
+        (stat_date, stat_hour, service_name, exception_type, environment,
+         exception_count, unique_fingerprint_count)
+        SELECT
+            DATE(occurred_at) as stat_date,
+            HOUR(occurred_at) as stat_hour,
+            app_name as service_name,
+            exception_type,
+            environment,
+            COUNT(*) as exception_count,
+            COUNT(DISTINCT fingerprint) as unique_fingerprint_count
+        FROM app_alarm_record
+        WHERE DATE(occurred_at) = #{date}
+        GROUP BY DATE(occurred_at), HOUR(occurred_at), app_name, exception_type, environment
+        ON DUPLICATE KEY UPDATE
+            exception_count = VALUES(exception_count),
+            unique_fingerprint_count = VALUES(unique_fingerprint_count),
+            updated_at = CURRENT_TIMESTAMP
+    </insert>
+
+</mapper>

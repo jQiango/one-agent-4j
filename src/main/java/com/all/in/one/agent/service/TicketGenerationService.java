@@ -22,11 +22,18 @@ import java.util.concurrent.atomic.AtomicLong;
 public class TicketGenerationService {
 
     private final AppAlarmTicketMapper appAlarmTicketMapper;
+    private final ResponsibleOwnerService ownerService;
+    private final com.all.in.one.agent.notification.manager.NotificationManager notificationManager;
     private static final AtomicLong ticketSequence = new AtomicLong(0);
     private static final DateTimeFormatter TICKET_NO_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
 
-    public TicketGenerationService(AppAlarmTicketMapper appAlarmTicketMapper) {
+    public TicketGenerationService(
+            AppAlarmTicketMapper appAlarmTicketMapper,
+            ResponsibleOwnerService ownerService,
+            com.all.in.one.agent.notification.manager.NotificationManager notificationManager) {
         this.appAlarmTicketMapper = appAlarmTicketMapper;
+        this.ownerService = ownerService;
+        this.notificationManager = notificationManager;
         log.info("TicketGenerationService 初始化完成");
     }
 
@@ -71,9 +78,21 @@ public class TicketGenerationService {
             // 创建新工单（使用 AI 建议）
             AppAlarmTicket ticket = buildTicket(appAlarmRecord, aiDecision);
             appAlarmTicketMapper.insert(ticket);
-            log.info("新工单已生成 - ticketNo={}, exceptionType={}, severity={}, aiSuggested={}",
+            log.info("新工单已生成并自动分派 - ticketNo={}, exceptionType={}, severity={}, assignee={}, aiSuggested={}",
                     ticket.getTicketNo(), ticket.getExceptionType(), ticket.getSeverity(),
+                    ticket.getAssignee(),
                     aiDecision != null ? aiDecision.getSuggestedSeverity() : "N/A");
+
+            // 发送飞书通知
+            try {
+                notificationManager.sendAlarmNotification(ticket, appAlarmRecord);
+                log.debug("飞书通知已发送 - ticketNo={}", ticket.getTicketNo());
+            } catch (Exception notificationException) {
+                // 通知失败不影响工单生成
+                log.error("发送飞书通知失败 - ticketNo={}, 错误: {}",
+                        ticket.getTicketNo(), notificationException.getMessage());
+            }
+
             return ticket.getId();
 
         } catch (Exception e) {
@@ -120,10 +139,14 @@ public class TicketGenerationService {
         ticket.setFirstOccurredAt(appAlarmRecord.getOccurredAt());
         ticket.setLastOccurredAt(appAlarmRecord.getOccurredAt());
 
-        // 责任人（后续可以根据服务配置自动分配）
-        ticket.setServiceOwner(null);
-        ticket.setAssignee(null);
+        // 自动分派责任人
+        String serviceName = appAlarmRecord.getAppName();
+        String owner = ownerService.findResponsibleOwner(serviceName);
+        ticket.setServiceOwner(owner);
+        ticket.setAssignee(owner);
         ticket.setReporter("AI-Agent");
+
+        log.debug("工单自动分派 - 服务: {}, 责任人: {}", serviceName, owner);
 
         // 处理状态
         ticket.setStatus("PENDING");
