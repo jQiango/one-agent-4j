@@ -4,6 +4,8 @@ import com.all.in.one.agent.config.ResponsibilityProperties;
 import com.all.in.one.agent.dao.entity.AlarmTrendStat;
 import com.all.in.one.agent.dao.mapper.AlarmTrendStatMapper;
 import com.all.in.one.agent.model.TrendReport;
+import com.all.in.one.agent.notification.service.FeishuNotificationService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -29,9 +31,13 @@ import java.util.stream.Collectors;
 public class TrendAnalysisService {
 
     private final AlarmTrendStatMapper trendStatMapper;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Autowired(required = false)
     private ResponsibilityProperties responsibilityProps;
+
+    @Autowired(required = false)
+    private FeishuNotificationService feishuService;
 
     /**
      * 预警阈值：变化率超过此值将触发预警
@@ -233,8 +239,7 @@ public class TrendAnalysisService {
     /**
      * 发送趋势告警到飞书
      * <p>
-     * 优化版：直接记录日志告警，不再入库
-     * TODO: 未来可扩展使用飞书汇总卡片发送趋势报告
+     * 优化版：使用飞书汇总卡片发送趋势报告
      * </p>
      */
     private void sendTrendAlert(TrendReport report) {
@@ -242,43 +247,75 @@ public class TrendAnalysisService {
             // 获取责任人信息
             String owner = getOwnerForService(report.getServiceName());
 
-            // 记录详细的趋势告警日志
+            // 记录日志
             log.warn("=".repeat(80));
-            log.warn("[趋势告警] ⚠️ 异常趋势预警");
-            log.warn("-".repeat(80));
-            log.warn("服务名称: {}", report.getServiceName());
-            log.warn("趋势类型: {} {}", getTrendEmoji(report.getTrendType()), report.getTrendType());
-            log.warn("变化率: {}%", report.getChangeRate());
-            log.warn("分析周期: 最近 {} 天", report.getDays());
-            log.warn("责任人: {}", owner);
-            log.warn("优先级: {}", determinePriority(report.getChangeRate()));
+            log.warn("[趋势告警] ⚠️ 检测到异常趋势预警 - 服务: {}, 趋势: {}, 变化率: {}%",
+                    report.getServiceName(), report.getTrendType(), report.getChangeRate());
+            log.warn("=".repeat(80));
+
+            // 发送飞书通知
+            if (feishuService != null) {
+                String reportData = buildTrendReportJson(report, owner);
+                feishuService.sendSummaryCard(reportData);
+                log.info("[趋势告警] 飞书通知已发送 - 服务: {}", report.getServiceName());
+            } else {
+                log.warn("[趋势告警] 飞书服务未配置，跳过通知 - 服务: {}", report.getServiceName());
+            }
+
+        } catch (Exception e) {
+            log.error("[趋势告警] 发送告警失败 - service={}", report.getServiceName(), e);
+        }
+    }
+
+    /**
+     * 构建趋势报告 JSON 数据（用于飞书汇总卡片）
+     */
+    private String buildTrendReportJson(TrendReport report, String owner) {
+        try {
+            Map<String, Object> data = new HashMap<>();
+            data.put("type", "trend_alert");
+            data.put("title", "📊 异常趋势预警");
+            data.put("serviceName", report.getServiceName());
+            data.put("owner", owner);
+            data.put("trendType", report.getTrendType());
+            data.put("trendEmoji", getTrendEmoji(report.getTrendType()));
+            data.put("changeRate", report.getChangeRate().toString());
+            data.put("days", report.getDays());
+            data.put("priority", determinePriority(report.getChangeRate()));
 
             // 历史数据摘要
             if (report.getHistoricalData() != null && !report.getHistoricalData().isEmpty()) {
                 List<Map.Entry<LocalDate, Integer>> entries = new ArrayList<>(report.getHistoricalData().entrySet());
-                log.warn("历史趋势: {} -> {}",
-                        entries.get(0).getKey() + "(" + entries.get(0).getValue() + "次)",
-                        entries.get(entries.size() - 1).getKey() + "(" + entries.get(entries.size() - 1).getValue() + "次)");
+                data.put("historyStart", entries.get(0).getKey().toString());
+                data.put("historyStartCount", entries.get(0).getValue());
+                data.put("historyEnd", entries.get(entries.size() - 1).getKey().toString());
+                data.put("historyEndCount", entries.get(entries.size() - 1).getValue());
             }
 
             // 预测数据摘要
             if (report.getPrediction() != null && !report.getPrediction().isEmpty()) {
                 List<Map.Entry<LocalDate, Integer>> predictions = new ArrayList<>(report.getPrediction().entrySet());
-                log.warn("未来预测: {} -> {}",
-                        predictions.get(0).getKey() + "(" + predictions.get(0).getValue() + "次)",
-                        predictions.get(predictions.size() - 1).getKey() + "(" + predictions.get(predictions.size() - 1).getValue() + "次)");
+                data.put("predictionStart", predictions.get(0).getKey().toString());
+                data.put("predictionStartCount", predictions.get(0).getValue());
+                data.put("predictionEnd", predictions.get(predictions.size() - 1).getKey().toString());
+                data.put("predictionEndCount", predictions.get(predictions.size() - 1).getValue());
             }
 
-            log.warn("=".repeat(80));
+            // 高峰时段
+            if (report.getPeakHours() != null && !report.getPeakHours().isEmpty()) {
+                List<String> peakHoursList = report.getPeakHours().entrySet().stream()
+                        .sorted(Map.Entry.<Integer, Long>comparingByValue().reversed())
+                        .limit(3)
+                        .map(e -> e.getKey() + "时(" + e.getValue() + "次)")
+                        .collect(Collectors.toList());
+                data.put("peakHours", String.join(", ", peakHoursList));
+            }
 
-            // TODO: 如果配置了飞书服务，可以使用 sendSummaryCard 发送汇总报告
-            // if (feishuService != null) {
-            //     String summaryData = buildTrendSummary(report, owner);
-            //     feishuService.sendSummaryCard(summaryData);
-            // }
+            return objectMapper.writeValueAsString(data);
 
         } catch (Exception e) {
-            log.error("[趋势告警] 发送告警失败 - service={}", report.getServiceName(), e);
+            log.error("[趋势告警] 构建JSON数据失败", e);
+            return "{}";
         }
     }
 

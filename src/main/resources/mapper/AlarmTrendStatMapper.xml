@@ -101,4 +101,13 @@
             updated_at = CURRENT_TIMESTAMP
     </insert>
 
+    <!-- 查询所有有统计数据的服务名称列表（去重） -->
+    <select id="selectDistinctServices" resultType="java.lang.String">
+        SELECT DISTINCT service_name
+        FROM alarm_trend_stat
+        WHERE service_name IS NOT NULL
+          AND stat_hour IS NULL
+        ORDER BY service_name
+    </select>
+
 </mapper>

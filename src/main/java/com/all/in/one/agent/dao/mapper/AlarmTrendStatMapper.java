@@ -64,4 +64,14 @@ public interface AlarmTrendStatMapper extends BaseMapper<AlarmTrendStat> {
      * @param date 统计日期
      */
     void aggregateHourlyStat(@Param("date") LocalDate date);
+
+    /**
+     * 查询所有有统计数据的服务名称列表（去重）
+     * <p>
+     * 用于定时任务批量分析所有服务的趋势
+     * </p>
+     *
+     * @return 服务名称列表
+     */
+    List<String> selectDistinctServices();
 }
