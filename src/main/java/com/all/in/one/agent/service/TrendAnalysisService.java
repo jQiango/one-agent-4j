@@ -4,8 +4,6 @@ import com.all.in.one.agent.config.ResponsibilityProperties;
 import com.all.in.one.agent.dao.entity.AlarmTrendStat;
 import com.all.in.one.agent.dao.mapper.AlarmTrendStatMapper;
 import com.all.in.one.agent.model.TrendReport;
-import com.all.in.one.agent.notification.FeishuNotificationService;
-import com.all.in.one.agent.notification.model.FeishuNotificationRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -31,9 +29,6 @@ import java.util.stream.Collectors;
 public class TrendAnalysisService {
 
     private final AlarmTrendStatMapper trendStatMapper;
-
-    @Autowired(required = false)
-    private FeishuNotificationService feishuService;
 
     @Autowired(required = false)
     private ResponsibilityProperties responsibilityProps;
@@ -238,98 +233,53 @@ public class TrendAnalysisService {
     /**
      * 发送趋势告警到飞书
      * <p>
-     * 优化版：直接发送飞书通知，不再入库
+     * 优化版：直接记录日志告警，不再入库
+     * TODO: 未来可扩展使用飞书汇总卡片发送趋势报告
      * </p>
      */
     private void sendTrendAlert(TrendReport report) {
         try {
-            // 如果飞书服务未配置，仅记录日志
-            if (feishuService == null) {
-                log.warn("[趋势告警] 飞书服务未配置 - 服务={}, 趋势={}, 变化率={}%",
-                        report.getServiceName(),
-                        report.getTrendType(),
-                        report.getChangeRate());
-                return;
-            }
-
             // 获取责任人信息
             String owner = getOwnerForService(report.getServiceName());
-            String feishuOpenId = getFeishuOpenId(owner);
 
-            // 构建飞书通知请求
-            FeishuNotificationRequest request = FeishuNotificationRequest.builder()
-                    .title("⚠️ 异常趋势告警")
-                    .serviceName(report.getServiceName())
-                    .content(buildAlertContent(report))
-                    .priority(determinePriority(report.getChangeRate()))
-                    .mentionedUsers(feishuOpenId != null ? List.of(feishuOpenId) : List.of())
-                    .build();
+            // 记录详细的趋势告警日志
+            log.warn("=".repeat(80));
+            log.warn("[趋势告警] ⚠️ 异常趋势预警");
+            log.warn("-".repeat(80));
+            log.warn("服务名称: {}", report.getServiceName());
+            log.warn("趋势类型: {} {}", getTrendEmoji(report.getTrendType()), report.getTrendType());
+            log.warn("变化率: {}%", report.getChangeRate());
+            log.warn("分析周期: 最近 {} 天", report.getDays());
+            log.warn("责任人: {}", owner);
+            log.warn("优先级: {}", determinePriority(report.getChangeRate()));
 
-            // 发送飞书通知
-            feishuService.sendNotification(request);
+            // 历史数据摘要
+            if (report.getHistoricalData() != null && !report.getHistoricalData().isEmpty()) {
+                List<Map.Entry<LocalDate, Integer>> entries = new ArrayList<>(report.getHistoricalData().entrySet());
+                log.warn("历史趋势: {} -> {}",
+                        entries.get(0).getKey() + "(" + entries.get(0).getValue() + "次)",
+                        entries.get(entries.size() - 1).getKey() + "(" + entries.get(entries.size() - 1).getValue() + "次)");
+            }
 
-            log.warn("[趋势告警] 已发送飞书通知 - 服务={}, 趋势={}, 变化率={}%, 责任人={}, 预测={}",
-                    report.getServiceName(),
-                    report.getTrendType(),
-                    report.getChangeRate(),
-                    owner,
-                    report.getPrediction());
+            // 预测数据摘要
+            if (report.getPrediction() != null && !report.getPrediction().isEmpty()) {
+                List<Map.Entry<LocalDate, Integer>> predictions = new ArrayList<>(report.getPrediction().entrySet());
+                log.warn("未来预测: {} -> {}",
+                        predictions.get(0).getKey() + "(" + predictions.get(0).getValue() + "次)",
+                        predictions.get(predictions.size() - 1).getKey() + "(" + predictions.get(predictions.size() - 1).getValue() + "次)");
+            }
+
+            log.warn("=".repeat(80));
+
+            // TODO: 如果配置了飞书服务，可以使用 sendSummaryCard 发送汇总报告
+            // if (feishuService != null) {
+            //     String summaryData = buildTrendSummary(report, owner);
+            //     feishuService.sendSummaryCard(summaryData);
+            // }
 
         } catch (Exception e) {
-            log.error("[趋势告警] 发送飞书通知失败 - service={}", report.getServiceName(), e);
+            log.error("[趋势告警] 发送告警失败 - service={}", report.getServiceName(), e);
         }
-    }
-
-    /**
-     * 构建告警消息内容
-     */
-    private String buildAlertContent(TrendReport report) {
-        StringBuilder content = new StringBuilder();
-
-        content.append("**异常趋势检测**\n\n");
-        content.append("服务名称: ").append(report.getServiceName()).append("\n");
-        content.append("趋势类型: ").append(getTrendEmoji(report.getTrendType()))
-                .append(" ").append(report.getTrendType()).append("\n");
-        content.append("变化率: ").append(report.getChangeRate()).append("%\n");
-        content.append("分析周期: 最近 ").append(report.getDays()).append(" 天\n\n");
-
-        // 历史数据（只展示前3条和后3条）
-        content.append("**历史趋势**:\n");
-        List<Map.Entry<LocalDate, Integer>> historicalEntries = new ArrayList<>(report.getHistoricalData().entrySet());
-        int size = historicalEntries.size();
-
-        if (size <= 6) {
-            // 数据少，全部展示
-            historicalEntries.forEach(entry ->
-                    content.append("  • ").append(entry.getKey()).append(": ").append(entry.getValue()).append(" 次\n"));
-        } else {
-            // 数据多，展示首尾
-            for (int i = 0; i < 3; i++) {
-                Map.Entry<LocalDate, Integer> entry = historicalEntries.get(i);
-                content.append("  • ").append(entry.getKey()).append(": ").append(entry.getValue()).append(" 次\n");
-            }
-            content.append("  • ...\n");
-            for (int i = size - 3; i < size; i++) {
-                Map.Entry<LocalDate, Integer> entry = historicalEntries.get(i);
-                content.append("  • ").append(entry.getKey()).append(": ").append(entry.getValue()).append(" 次\n");
-            }
-        }
-
-        // 预测数据（前3天）
-        if (report.getPrediction() != null && !report.getPrediction().isEmpty()) {
-            content.append("\n**未来预测** (线性回归):\n");
-            report.getPrediction().entrySet().stream()
-                    .limit(3)
-                    .forEach(entry -> content.append("  • ")
-                            .append(entry.getKey())
-                            .append(": 约 ")
-                            .append(entry.getValue())
-                            .append(" 次\n"));
-        }
-
-        content.append("\n建议: 请及时排查异常原因");
-
-        return content.toString();
     }
 
     /**

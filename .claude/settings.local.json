@@ -23,7 +23,8 @@
       "Bash(powershell -Command:*)",
       "Bash(.\\mvnw.cmd clean compile:*)",
       "Bash(./mvnw.cmd clean compile:*)",
-      "Bash(del:*)"
+      "Bash(del:*)",
+      "Bash(timeout:*)"
     ],
     "deny": [],
     "ask": []
